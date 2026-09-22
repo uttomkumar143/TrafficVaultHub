@@ -1,11 +1,14 @@
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "./lib/bindings";
 import { AppError, errorResponse } from "./lib/errors";
 import { LogEmailSender, type EmailSender } from "./modules/auth/email";
 import { AuthRepository } from "./modules/auth/repository";
 import { AuthService } from "./modules/auth/service";
+import { OrganizationRepository } from "./modules/organizations/repository";
+import { OrganizationService } from "./modules/organizations/service";
 import { authRoutes } from "./routes/auth";
 import { healthRoutes } from "./routes/health";
+import { organizationRoutes } from "./routes/organizations";
 
 export interface CreateAppOptions {
   /** Override the email port (tests use MemoryEmailSender). */
@@ -38,9 +41,12 @@ export function createApp(options: CreateAppOptions = {}) {
   // AppError → its own status/code; anything else → 500 without details.
   app.onError((err, c) => errorResponse(err, c));
 
-  // Per-request service wiring. Services are cheap objects over the bound
-  // D1 database; constructing them per request keeps the app stateless.
-  app.use("/api/v1/auth/*", async (c, next) => {
+  // Per-request service wiring for every DB-backed module. Services are cheap
+  // objects over the bound D1 database; constructing them per request keeps
+  // the app stateless. `requireAuth` relies on `authService` being present,
+  // so every protected module prefix MUST be listed here when mounted below.
+  // (Not a blanket `/api/v1/*`: unknown paths must stay 404, never 503.)
+  const wireServices: MiddlewareHandler<AppEnv> = async (c, next) => {
     if (!c.env?.DB) {
       // Misconfigured binding — fail closed with the uniform envelope.
       throw new AppError(503, "SERVICE_UNAVAILABLE", "Database binding is not configured");
@@ -53,13 +59,18 @@ export function createApp(options: CreateAppOptions = {}) {
         exposeDebugTokens: c.env.APP_ENV === "development",
       }),
     );
+    c.set("organizationService", new OrganizationService(new OrganizationRepository(c.env.DB), c.env.DB));
     await next();
-  });
+  };
+  app.use("/api/v1/auth/*", wireServices);
+  app.use("/api/v1/organizations", wireServices);
+  app.use("/api/v1/organizations/*", wireServices);
 
   // API v1 (PRD §70)
   const v1 = new Hono<AppEnv>();
   v1.route("/health", healthRoutes);
   v1.route("/auth", authRoutes);
+  v1.route("/organizations", organizationRoutes);
 
   app.route("/api/v1", v1);
 

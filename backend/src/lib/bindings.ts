@@ -3,6 +3,7 @@
  * Mirrors `wrangler.jsonc`. Keep in sync when bindings change.
  */
 import type { AuthService, AuthenticatedContext } from "../modules/auth/service";
+import type { OrganizationService } from "../modules/organizations/service";
 
 export interface Bindings {
   // vars
@@ -24,6 +25,7 @@ export interface Bindings {
 /** Per-request variables set by middleware. */
 export interface Variables {
   authService: AuthService;
+  organizationService: OrganizationService;
   /** Present only after `requireAuth` has run. */
   auth: AuthenticatedContext;
 }
