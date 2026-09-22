@@ -7,6 +7,7 @@ Cloudflare D1 (SQLite) schema migrations, applied in filename order.
 | `0001_initial.sql` | Foundational identity & tenancy: `organizations`, `users`, `roles`, `permissions`, `role_permissions`, `organization_members` |
 | `0002_identity.sql` | Auth foundation (Phase 1 U1): `user_credentials`, `sessions`, `auth_tokens`, `auth_events`; adds `users.mfa_enabled` flag |
 | `0003_organizations.sql` | Organizations (Phase 1 U3): `roles.is_owner`, `role_org_types`, PRD §9 system role catalogue (reference rows, fixed ids), append-only `audit_logs` |
+| `0004_permissions.sql` | RBAC (Phase 1 U4): PRD §10 `permissions` catalogue (+ `organizations.*`, `members.*`) and `role_permissions` grants for the 14 system roles (reference rows, fixed ids, key-based INSERT…SELECT) |
 
 Rules (PRD §109):
 - Applied migrations are immutable — never edit; add a new numbered file.

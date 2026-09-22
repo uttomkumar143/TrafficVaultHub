@@ -70,6 +70,63 @@ describe("test D1 shim", () => {
     ]);
   });
 
+  it("applies 0004: permission catalogue (PRD §10) and role grants", async () => {
+    db = createTestD1();
+    const perms = await db.prepare("SELECT key FROM permissions ORDER BY key").all<{ key: string }>();
+    expect(perms.results.map((p) => p.key)).toEqual([
+      "audit.read",
+      "compliance.read",
+      "compliance.resolve",
+      "conversions.approve",
+      "conversions.read",
+      "conversions.reject",
+      "fraud.read",
+      "fraud.review",
+      "ledger.adjust",
+      "ledger.read",
+      "members.manage",
+      "members.read",
+      "offers.approve",
+      "offers.create",
+      "offers.pause",
+      "offers.read",
+      "offers.update",
+      "organizations.read",
+      "organizations.update",
+      "payouts.approve",
+      "payouts.read",
+      "payouts.release",
+      "payouts.review",
+    ]);
+
+    const grants = await db
+      .prepare(
+        `SELECT r.key AS role, p.key AS permission
+           FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
+          ORDER BY r.key, p.key`,
+      )
+      .all<{ role: string; permission: string }>();
+    const byRole = new Map<string, string[]>();
+    for (const g of grants.results) byRole.set(g.role, [...(byRole.get(g.role) ?? []), g.permission]);
+
+    // Every system role has at least one grant; SUPER_ADMIN has all.
+    expect([...byRole.keys()].sort()).toHaveLength(14);
+    expect(byRole.get("SUPER_ADMIN")).toEqual(perms.results.map((p) => p.key));
+
+    // Owner roles hold the management keys; VIEWER holds only read keys.
+    for (const owner of ["ADVERTISER_OWNER", "AFFILIATE_OWNER"]) {
+      expect(byRole.get(owner)).toEqual(expect.arrayContaining(["organizations.update", "members.manage"]));
+    }
+    expect(byRole.get("VIEWER")).toEqual(["conversions.read", "members.read", "offers.read", "organizations.read"]);
+
+    // Network-only powers never reach tenant roles (PRD §11 separation of duties).
+    const networkOnly = ["offers.approve", "ledger.adjust", "payouts.approve", "payouts.release", "compliance.resolve", "fraud.review"];
+    for (const [role, keys] of byRole) {
+      if (["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_MANAGER", "COMPLIANCE_MANAGER"].includes(role)) continue;
+      expect(keys.filter((k) => networkOnly.includes(k)), role).toEqual([]);
+    }
+  });
+
   it("supports bind/first/run and enforces schema constraints", async () => {
     db = createTestD1();
     const ins = await db
