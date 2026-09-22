@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 .dev.vars
+.dev.vars.*
+!.dev.vars.example
 *.pem
 *.key
 
@@ -13,6 +15,10 @@ node_modules/
 dist/
 build/
 .wrangler/
+*.tsbuildinfo
+
+# Test output
+coverage/
 
 # Logs / runtime
 *.log

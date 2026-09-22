@@ -9,25 +9,23 @@ Status: IN PROGRESS. Phase 0 execution prompt received 2026-09-22. No Phase 0
 unit has been completed yet. Phase 0 is NOT complete.
 
 ## Last Completed Unit
-Repository recovery / pre-Phase-0 checkpoint
-
-Verified at this checkpoint (2026-09-22 08:37 UTC):
-- Branch `main`, remote `origin` = https://github.com/uttomkumar143/TrafficVaultHub.git
-- Working tree clean; local HEAD `2ae1e74` == `origin/main`
-- Files present: `PRD.md` (root), `README.md`, `STATE-TEMPLATE.md`, `STATE.md`,
-  `docs/BUILD_PROGRESS.md`, `.gitignore`
-- `docs/PRD.md` does NOT exist yet (PRD is at repo root)
-- No `frontend/`, `backend/`, `migrations/`, `tests/`, `scripts/`, `.github/`
-- No package manifests, Wrangler config, or CI
-- `STATE-TEMPLATE.md` and `STATE.md` both present; template untouched
-- Toolchain: Node v22.23.2, npm 10.9.8, wrangler CLI, python3 (sqlite 3.46.1)
-
-## Next Planned Unit
 Unit 1 — Repository Scaffolding
 
-Scope: create `frontend/`, `backend/`, `migrations/`, `tests/`,
-`docs/{adr,api,architecture,runbooks}/`, `scripts/`; move `PRD.md` →
-`docs/PRD.md` via `git mv` (content unchanged); update `.gitignore`.
+- `PRD.md` moved to `docs/PRD.md` via `git mv`; SHA-256 identical before/after
+  (`54aee2b6…9cd9ac`). Content unchanged.
+- Created `frontend/src/{app,components,features,hooks,lib,routes,types}`,
+  `backend/src/{modules,middleware,integrations,workers,lib,routes}`,
+  `migrations/`, `tests/`, `docs/{adr,api,architecture,runbooks}/`, `scripts/`
+  (with `.gitkeep` placeholders).
+- `.gitignore` updated (adds `coverage/`, `*.tsbuildinfo`, `.dev.vars.*`).
+- Added `scripts/secret-scan.sh`; scan result: CLEAN.
+
+## Next Planned Unit
+Unit 2 — Backend Skeleton
+
+Scope: `backend/` as Cloudflare Workers + Hono + TypeScript, `GET /api/v1/health`
+→ `{"status":"ok"}`, `wrangler.jsonc` with placeholder D1/KV/R2/Queues/DO
+bindings, `.dev.vars.example`, typecheck + build + `wrangler dev` verification.
 
 ## Open Questions / Blockers
 - `PRD.md` ends mid-sentence at line 581 ("Advertiser experience shoul").
@@ -39,10 +37,10 @@ Scope: create `frontend/`, `backend/`, `migrations/`, `tests/`,
   (no monorepo tooling) unless the PRD requires otherwise — decided for Unit 1+.
 
 ## Notes for the Next Session
-- Read `docs/PRD.md` (after Unit 1) — esp. §119–§121.
+- Read `docs/PRD.md` — esp. §119–§121.
 - Loop after every unit: WORK → VALIDATE → SECRET SCAN → UPDATE STATE.md →
   COMMIT → PUSH → VERIFY → NEXT UNIT.
 - See `docs/BUILD_PROGRESS.md` for the recovery audit.
 
 ## Last Updated
-2026-09-22 08:37 UTC — initial Phase 0 STATE checkpoint (before Unit 1)
+2026-09-22 08:40 UTC — Unit 1 complete
