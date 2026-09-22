@@ -1,0 +1,8 @@
+# Local development secrets for `wrangler dev`.
+# Copy to `.dev.vars` (git-ignored) and fill in values as needed.
+# NEVER commit `.dev.vars`. Production secrets use `wrangler secret put`.
+#
+# Phase 0 requires no secrets. This file documents the mechanism only.
+
+# Example (unused in Phase 0):
+# EXAMPLE_SECRET=replace-me

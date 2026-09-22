@@ -9,23 +9,30 @@ Status: IN PROGRESS. Phase 0 execution prompt received 2026-09-22. No Phase 0
 unit has been completed yet. Phase 0 is NOT complete.
 
 ## Last Completed Unit
-Unit 1 — Repository Scaffolding
-
-- `PRD.md` moved to `docs/PRD.md` via `git mv`; SHA-256 identical before/after
-  (`54aee2b6…9cd9ac`). Content unchanged.
-- Created `frontend/src/{app,components,features,hooks,lib,routes,types}`,
-  `backend/src/{modules,middleware,integrations,workers,lib,routes}`,
-  `migrations/`, `tests/`, `docs/{adr,api,architecture,runbooks}/`, `scripts/`
-  (with `.gitkeep` placeholders).
-- `.gitignore` updated (adds `coverage/`, `*.tsbuildinfo`, `.dev.vars.*`).
-- Added `scripts/secret-scan.sh`; scan result: CLEAN.
-
-## Next Planned Unit
 Unit 2 — Backend Skeleton
 
-Scope: `backend/` as Cloudflare Workers + Hono + TypeScript, `GET /api/v1/health`
-→ `{"status":"ok"}`, `wrangler.jsonc` with placeholder D1/KV/R2/Queues/DO
-bindings, `.dev.vars.example`, typecheck + build + `wrangler dev` verification.
+- `backend/`: Cloudflare Workers + Hono 4 + TypeScript (strict).
+  Files: `package.json`, `tsconfig.json`, `wrangler.jsonc`, `.dev.vars.example`,
+  `src/index.ts` (entry), `src/app.ts` (`createApp()`), `src/routes/health.ts`,
+  `src/lib/bindings.ts`.
+- `GET /api/v1/health` → `{"status":"ok"}` (fixed payload, no DB access).
+  404/500 use PRD §72 error envelope.
+- `wrangler.jsonc`: placeholder bindings for D1 (`DB`), KV (`CACHE`), R2
+  (`STORAGE`), Queues producer (`EVENTS_QUEUE`); Durable Objects structure
+  documented as a comment (needs a class + migration to activate). No real IDs.
+- Verified: `npm install` OK (0 vulnerabilities); `npm run typecheck` PASS;
+  `npm run build` (wrangler deploy --dry-run) PASS, 84 KiB bundle, all bindings
+  recognized; `wrangler dev --local` on :8787 → `curl /api/v1/health` returned
+  HTTP 200 `{"status":"ok"}`. Secret scan CLEAN.
+- Dependency note: `@cloudflare/workers-types` ^5 required by wrangler 4.136.
+
+## Next Planned Unit
+Unit 3 — Frontend Skeleton
+
+Scope: `frontend/` as React + Vite + TypeScript with Tailwind CSS, shadcn/ui
+(base setup), React Router, TanStack Query provider, React Hook Form + Zod,
+Recharts installed; app shell + placeholder home route with static text only
+(no fake business metrics). Verify `npm run build` + typecheck.
 
 ## Open Questions / Blockers
 - `PRD.md` ends mid-sentence at line 581 ("Advertiser experience shoul").
@@ -43,4 +50,4 @@ bindings, `.dev.vars.example`, typecheck + build + `wrangler dev` verification.
 - See `docs/BUILD_PROGRESS.md` for the recovery audit.
 
 ## Last Updated
-2026-09-22 08:40 UTC — Unit 1 complete
+2026-09-22 08:45 UTC — Unit 2 complete

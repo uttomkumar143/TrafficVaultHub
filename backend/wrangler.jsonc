@@ -1,0 +1,78 @@
+/**
+ * TrafficVaultHub — Backend Worker configuration (Phase 0 skeleton)
+ *
+ * All resource IDs below are PLACEHOLDERS. No real Cloudflare account,
+ * database, namespace, bucket, or queue has been provisioned yet.
+ * Replace placeholders when the deployment target is decided.
+ * Never commit real credentials here — secrets belong in `wrangler secret put`
+ * (production) or `.dev.vars` (local, git-ignored; see `.dev.vars.example`).
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "trafficvaulthub-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Non-secret configuration exposed to the Worker.
+  "vars": {
+    "APP_ENV": "development",
+    "API_VERSION": "v1"
+  },
+
+  // Primary relational database (PRD §92–§93). Local dev uses an automatic
+  // SQLite instance; the placeholder id is not a real D1 database.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "trafficvaulthub-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../migrations"
+    }
+  ],
+
+  // Cache layer (PRD §45). Placeholder namespace id.
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "PLACEHOLDER_KV_NAMESPACE_ID"
+    }
+  ],
+
+  // Object storage (PRD §100). Bucket name only — no credentials.
+  "r2_buckets": [
+    {
+      "binding": "STORAGE",
+      "bucket_name": "trafficvaulthub-storage"
+    }
+  ],
+
+  // Async processing (PRD §106). Producer binding only in Phase 0;
+  // consumers are registered when a module actually processes messages.
+  "queues": {
+    "producers": [
+      {
+        "binding": "EVENTS_QUEUE",
+        "queue": "trafficvaulthub-events"
+      }
+    ]
+  },
+
+  // Coordination / hot state (PRD §44–§45).
+  // A Durable Object binding requires an exported class plus a migration entry.
+  // No module needs coordination in Phase 0, so the structure is documented
+  // here and will be activated by the first module that requires it:
+  //
+  // "durable_objects": {
+  //   "bindings": [
+  //     { "name": "COORDINATOR", "class_name": "CoordinatorObject" }
+  //   ]
+  // },
+  // "migrations": [
+  //   { "tag": "v1", "new_sqlite_classes": ["CoordinatorObject"] }
+  // ],
+
+  "observability": {
+    "enabled": true
+  }
+}
