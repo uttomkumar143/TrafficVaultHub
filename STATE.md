@@ -9,30 +9,33 @@ Status: IN PROGRESS. Phase 0 execution prompt received 2026-09-22. No Phase 0
 unit has been completed yet. Phase 0 is NOT complete.
 
 ## Last Completed Unit
-Unit 2 — Backend Skeleton
-
-- `backend/`: Cloudflare Workers + Hono 4 + TypeScript (strict).
-  Files: `package.json`, `tsconfig.json`, `wrangler.jsonc`, `.dev.vars.example`,
-  `src/index.ts` (entry), `src/app.ts` (`createApp()`), `src/routes/health.ts`,
-  `src/lib/bindings.ts`.
-- `GET /api/v1/health` → `{"status":"ok"}` (fixed payload, no DB access).
-  404/500 use PRD §72 error envelope.
-- `wrangler.jsonc`: placeholder bindings for D1 (`DB`), KV (`CACHE`), R2
-  (`STORAGE`), Queues producer (`EVENTS_QUEUE`); Durable Objects structure
-  documented as a comment (needs a class + migration to activate). No real IDs.
-- Verified: `npm install` OK (0 vulnerabilities); `npm run typecheck` PASS;
-  `npm run build` (wrangler deploy --dry-run) PASS, 84 KiB bundle, all bindings
-  recognized; `wrangler dev --local` on :8787 → `curl /api/v1/health` returned
-  HTTP 200 `{"status":"ok"}`. Secret scan CLEAN.
-- Dependency note: `@cloudflare/workers-types` ^5 required by wrangler 4.136.
-
-## Next Planned Unit
 Unit 3 — Frontend Skeleton
 
-Scope: `frontend/` as React + Vite + TypeScript with Tailwind CSS, shadcn/ui
-(base setup), React Router, TanStack Query provider, React Hook Form + Zod,
-Recharts installed; app shell + placeholder home route with static text only
-(no fake business metrics). Verify `npm run build` + typecheck.
+- `frontend/`: React 19 + Vite 7 + TypeScript (strict), Tailwind CSS 4
+  (`@tailwindcss/vite`), shadcn/ui base (`components.json`, tokens in
+  `src/app/globals.css`, `src/lib/utils.ts`, `components/ui/button.tsx`),
+  React Router 7 (`src/routes/index.tsx`), TanStack Query provider
+  (`src/app/providers.tsx`, `src/lib/query-client.ts`), React Hook Form, Zod,
+  Recharts installed (not yet used).
+- App shell (`components/layout/app-shell.tsx`), home route (static text +
+  live `/api/v1/health` probe via `hooks/use-health.ts`), 404 route.
+  No fake business metrics displayed.
+- Vite dev proxy forwards `/api` → `http://127.0.0.1:8787` (backend Worker).
+- Verified: `npm install` OK (0 vulnerabilities); `npm run typecheck` PASS
+  (app + node configs); `npm run build` PASS (98 modules, 384 KB JS /
+  16 KB CSS); `vite preview` served `/` with HTTP 200. Headless-browser render
+  check through the sandbox proxy returned 403 (proxy auth, not app) — DOM
+  render NOT independently verified yet; covered by Unit 5 smoke test.
+  Secret scan CLEAN.
+
+## Next Planned Unit
+Unit 4 — Foundational Database Migration
+
+Scope: `migrations/0001_initial.sql` with ONLY `organizations`, `users`,
+`organization_members`, `roles`, `permissions`, `role_permissions`.
+UTC timestamps, FKs, unique constraints, indexes, tenant-aware. No money
+fields, no seed data. Validate with sqlite3 (python) and `wrangler d1
+migrations apply --local`.
 
 ## Open Questions / Blockers
 - `PRD.md` ends mid-sentence at line 581 ("Advertiser experience shoul").
@@ -50,4 +53,4 @@ Recharts installed; app shell + placeholder home route with static text only
 - See `docs/BUILD_PROGRESS.md` for the recovery audit.
 
 ## Last Updated
-2026-09-22 08:45 UTC — Unit 2 complete
+2026-09-22 08:55 UTC — Unit 3 complete
