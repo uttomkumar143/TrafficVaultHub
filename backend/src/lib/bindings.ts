@@ -12,6 +12,9 @@ export interface Bindings {
   CACHE: KVNamespace;
   STORAGE: R2Bucket;
   EVENTS_QUEUE: Queue;
+
+  // Durable Object namespace — placeholder class, no behaviour in Phase 0.
+  COORDINATOR: DurableObjectNamespace;
 }
 
 export type AppEnv = { Bindings: Bindings };

@@ -59,18 +59,17 @@
   },
 
   // Coordination / hot state (PRD §44–§45).
-  // A Durable Object binding requires an exported class plus a migration entry.
-  // No module needs coordination in Phase 0, so the structure is documented
-  // here and will be activated by the first module that requires it:
-  //
-  // "durable_objects": {
-  //   "bindings": [
-  //     { "name": "COORDINATOR", "class_name": "CoordinatorObject" }
-  //   ]
-  // },
-  // "migrations": [
-  //   { "tag": "v1", "new_sqlite_classes": ["CoordinatorObject"] }
-  // ],
+  // `CoordinatorObject` is a placeholder class exported from `src/index.ts`
+  // (defined in `src/workers/coordinator-object.ts`). It has no behaviour in
+  // Phase 0; the first module needing coordination will implement it.
+  "durable_objects": {
+    "bindings": [
+      { "name": "COORDINATOR", "class_name": "CoordinatorObject" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["CoordinatorObject"] }
+  ],
 
   "observability": {
     "enabled": true
