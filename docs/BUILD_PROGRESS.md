@@ -105,7 +105,13 @@ No existing file was modified, moved, or deleted.
 
 ### Git checkpoint / GitHub push
 
-See the "Checkpoint" entry appended below after the commit is made.
+- Commit: `734ce4f1ad39f6c010cc06955c7a73b993bfc7fe` — "Recovery checkpoint:
+  add verified STATE.md, docs/BUILD_PROGRESS.md, .gitignore" (2026-09-22 07:57 UTC)
+- Push: `git push origin main` → `b0233ea..734ce4f main -> main` — SUCCESS
+- Verification: `git ls-remote --heads origin main` = `734ce4f…`; GitHub API
+  `commits/main` returns the same SHA. **PUSH VERIFIED.**
+- Method: normal commit + normal push. No reset, no force push, no history rewrite.
+- A follow-up commit records this checkpoint entry itself.
 
 ### Blockers
 
