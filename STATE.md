@@ -3,46 +3,57 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
-Phase 0 — Bootstrap (NOT STARTED)
+Phase 0 — Bootstrap
 
-Evidence: the repository contains documentation only (`PRD.md`, `README.md`,
-`STATE-TEMPLATE.md`). No source code, package manifests, Cloudflare config,
-migrations, tests, CI workflows, or `.gitignore` exist in the working tree or
-anywhere in git history (8 commits, single `main` branch, no tags, no PRs).
+Status: Phase 0 is IN PROGRESS at the pre-Unit-1 checkpoint. No Phase 0 unit has
+been completed. Phase 0 is NOT complete.
+
+Evidence: repository contains documentation only (`PRD.md`, `README.md`,
+`STATE-TEMPLATE.md`, `STATE.md`, `docs/BUILD_PROGRESS.md`, `.gitignore`).
+No source code, package manifests, Cloudflare config, migrations, tests, or CI
+workflows exist in the working tree or in git history (10 commits, `main` only).
 
 ## Last Completed Unit
-Recovery session (2026-09-22): repository inspected, git history reconstructed,
-secret scan run (clean), state documentation created. No implementation work
-exists from any previous session.
+Repository recovery / pre-Phase-0 checkpoint
 
-Latest pre-recovery commit: `b0233ea` — "Revise STATE-TEMPLATE.md with project
-guidelines" (2026-09-22 13:53 +0600). It removed `STATE.md` and expanded
-`STATE-TEMPLATE.md`; it contains no code.
+- Recovery session (2026-09-22): repo inspected end-to-end, git history
+  reconstructed, secret scan clean, `STATE.md` recreated from template with
+  verified data, `docs/BUILD_PROGRESS.md` and `.gitignore` added
+  (commits `734ce4f`, `ece1843`, pushed and verified on `origin/main`).
+- This checkpoint: `STATE.md` re-verified present alongside `STATE-TEMPLATE.md`
+  and updated to the Phase 0 unit-tracking format. No other files changed.
 
 ## Next Planned Unit
-Run the Phase 0 bootstrap prompt: initialize repo structure, tooling, and first
-migration. (Not started in this session — recovery only.)
+Unit 1 — Repository Scaffolding
 
-Housekeeping to resolve at the start of Phase 0 (do not do silently):
-- `PRD.md` lives at repo root; `README.md` and the template reference `docs/PRD.md`.
-  Decide whether to move it (`git mv PRD.md docs/PRD.md`) or update references.
-- Prompt-kit files referenced by `README.md` (`01-MASTER-SYSTEM-PROMPT.md`,
-  `02-AUTO-COMMIT-PROTOCOL.md`, `03`–`12` phase prompts, `13-DEPLOYMENT-GUIDE-BN.md`)
-  are NOT in the repository and must be supplied by the user.
+Target layout is PRD §121 (`frontend/`, `backend/`, `migrations/`, `tests/`,
+`docs/{adr,api,architecture,runbooks}/`, `scripts/`, root `README.md`).
+NOT STARTED — see blockers below before beginning.
 
 ## Open Questions / Blockers
-- Cloudflare: NOT CONFIGURED in repo (no `wrangler.*`). Hosted-deploy status
-  check via `gsk hosted list` was BLOCKED (CLI requires paid plan / credits).
-  No `cloudflare_project_name` recorded in project meta.
-- Phase prompt files (01–13) are missing from the repo; Phase 0 cannot start
-  until the user provides the Phase 0 prompt.
+- Phase 0 prompt file (`03-…`, defining the eight Phase 0 units and the exact
+  scope of Unit 1) and `02-AUTO-COMMIT-PROTOCOL.md` are NOT in the repository.
+  Only the unit name "Unit 1 — Repository Scaffolding" has been supplied.
+- `PRD.md` lives at repo root; `README.md` and the template reference
+  `docs/PRD.md`. Decision needed: move (`git mv PRD.md docs/PRD.md`) or update
+  references. Not done silently.
+- Cloudflare: NOT CONFIGURED (no `wrangler.*`). `gsk hosted list` re-run this
+  session → still `free_plan_block` (CLI needs paid plan / ≥500 credits).
+  No `cloudflare_project_name` in project meta. Deployment path (Genspark-hosted
+  vs. user's own Cloudflare account) is undecided. Note: Genspark hosted deploy
+  supports only D1 + R2 bindings; PRD architecture also calls for Durable
+  Objects, Queues and KV, which would require the user's own Cloudflare account.
+- Sandbox toolchain verified: Node v22.23.2, npm 10.9.8. Package manager /
+  workspace strategy for the `frontend/` + `backend/` split not yet decided.
 
 ## Notes for the Next Session
-- Read `PRD.md` (v10.0, 128 numbered sections) before continuing.
-- `README.md` is a prompt-kit usage guide, not a project README; it references
-  files that are not in this repo.
-- See `docs/BUILD_PROGRESS.md` for the full recovery audit (area-by-area status,
-  tests run, secret scan, push verification).
+- Read `PRD.md` (v10.0) before continuing — especially §119–§121 (agent
+  protocol, forbidden actions, repository structure).
+- `README.md` is the prompt-kit usage guide, not a project README; it references
+  prompt files (01–13) that are not in this repo.
+- See `docs/BUILD_PROGRESS.md` for the full recovery audit.
+- Loop after every unit: WORK → VALIDATE → SECRET SCAN → UPDATE STATE.md →
+  COMMIT → PUSH → VERIFY → NEXT UNIT.
 
 ## Last Updated
-2026-09-22 (UTC) — recovery session
+2026-09-22 08:25 UTC — pre-Phase-0 checkpoint (STATE.md initialized for unit tracking)
