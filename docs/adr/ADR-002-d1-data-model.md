@@ -150,6 +150,27 @@ created_at)`. Rules:
   permission keys for UI gating. It is informational only; the server
   re-checks every request.
 
+### 6. Tenant-scoping helper for `organization_id`-owned resources (Unit 5)
+
+- `backend/src/lib/tenant-scope.ts` defines a branded `TenantId` obtainable
+  only via `tenantIdOf(tenant)` from the `TenantContext` that `requireOrg`
+  resolved, and `scopedQuery(db, sql, tenantId, ...params)` which throws
+  `UnscopedQueryError` unless the SQL's FIRST bind placeholder is an
+  `organization_id = ?` predicate. Repositories for business tables (Phase 2:
+  offers, advertiser/affiliate profiles, creatives, traffic sources, billing
+  accounts …) MUST accept `TenantId`, not `string`, and build their queries
+  with `scopedQuery`. A raw client-supplied id therefore fails typecheck, and
+  a forgotten predicate fails at runtime before reaching D1.
+- The predicate check is textual and conservative by design; it is a guard
+  against omission, not a proof. The authority remains the explicit PRD §116
+  suite `backend/src/routes/tenant-isolation.test.ts` (two tenants; every
+  read/mutation of B by A → 404; B's member ids under A's path → 404;
+  body/query `organization_id` ignored; dual-membership authority scoped per
+  path; PLATFORM not self-creatable; revoked session → 401), which every
+  later phase extends with its own resource family.
+- `audit_logs` is currently the only `organization_id`-owned table and is
+  used as the fixture for the helper's tests.
+
 ## Consequences
 
 - **Positive:** authorization data (role catalogue, owner flag, type matrix)
@@ -160,6 +181,6 @@ created_at)`. Rules:
 - **Negative / accepted:** role catalogue changes require a migration (by
   design — PRD §109 wants schema-level immutability). The owner-only
   management rule is coarser than the §10 permission model until Unit 4 lands.
-- **Follow-ups:** Unit 5 adds the generic tenant-scoping helper for
-  `organization_id`-owned business resources and the explicit cross-tenant
-  test suite; Phase 9 documents the PLATFORM bootstrap runbook.
+- **Follow-ups:** Phase 2 repositories adopt `TenantId` + `scopedQuery`
+  (§6) and extend `tenant-isolation.test.ts` with offer/profile cases;
+  Phase 9 documents the PLATFORM bootstrap runbook.
