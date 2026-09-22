@@ -6,11 +6,12 @@ Cloudflare D1 (SQLite) schema migrations, applied in filename order.
 |------|-------|
 | `0001_initial.sql` | Foundational identity & tenancy: `organizations`, `users`, `roles`, `permissions`, `role_permissions`, `organization_members` |
 | `0002_identity.sql` | Auth foundation (Phase 1 U1): `user_credentials`, `sessions`, `auth_tokens`, `auth_events`; adds `users.mfa_enabled` flag |
+| `0003_organizations.sql` | Organizations (Phase 1 U3): `roles.is_owner`, `role_org_types`, PRD §9 system role catalogue (reference rows, fixed ids), append-only `audit_logs` |
 
 Rules (PRD §109):
 - Applied migrations are immutable — never edit; add a new numbered file.
 - Timestamps are UTC ISO-8601 TEXT; ids are application-generated TEXT UUIDs.
-- No seed/production data in migrations.
+- No seed/production data in migrations. PRD-defined reference catalogues (e.g. the §9 role keys) are the one exception and must be idempotent (`INSERT OR IGNORE`, fixed ids).
 
 Apply locally (from `backend/`, where `wrangler.jsonc` points `migrations_dir` here):
 
