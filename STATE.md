@@ -17,23 +17,24 @@ Phase 0 unit status (verified by repository audit, 2026-09-22):
 | 4 | `migrations/0001_initial.sql` (six foundational tables) | COMPLETE — applied locally; immutable |
 | 5 | Testing setup (Vitest smoke tests, backend + frontend) | COMPLETE — backend: `backend/vitest.config.ts`, `src/routes/health.test.ts` (2 pass). Frontend: `frontend/vitest.config.ts`, `src/test/setup.ts`, `src/app/app.test.tsx` (2 pass, jsdom + Testing Library). Typecheck + build pass on both sides. |
 | 6 | CI skeleton (`.github/workflows/ci.yml`) | BLOCKED (push) — workflow written, YAML validated, full sequence reproduced locally, committed as `89b8d87` on LOCAL branch `ci/github-actions-workflow`. GitHub rejects the push: GitHub App token lacks `workflows` permission. Not on `origin/main`. |
-| 7 | Docs (root `README.md`, `docs/architecture/overview.md`) | PARTIAL — root README is the prompt-kit usage guide, not a project README; `docs/architecture/` is empty |
+| 7 | Docs (root `README.md`, `docs/architecture/overview.md`) | COMPLETE — `docs/architecture/overview.md` written (modules, tenancy, authz, Cloudflare, `/api/v1`; links PRD). Prompt-kit guide preserved verbatim at `docs/runbooks/ai-build-kit.md`; root `README.md` is now the project README (stack, structure, local dev, D1 migrations, tests, build). |
 | 8 | STATE.md reflecting Phase 0 complete, next unit = Phase 1 | PARTIAL — this file exists and is maintained, but Phase 0 is not complete |
 
 ## Last Completed Unit
-Unit 5 — Testing Setup. Backend: `npm test` (Vitest) runs
-`GET /api/v1/health` via `createApp().request()` → 200 `{"status":"ok"}`.
-Frontend: `npm test` (Vitest + jsdom + Testing Library) renders the real route
-table under `createMemoryRouter` + `QueryClientProvider`, asserts AppShell
-landmarks, HomePage heading, stubbed health result, and NotFound route.
-`npm run typecheck` and `npm run build` pass in both `backend/` and `frontend/`.
+Unit 7 — Docs. `docs/architecture/overview.md` (architecture summary
+referencing PRD sections, no PRD duplication); prompt-kit guide moved verbatim
+to `docs/runbooks/ai-build-kit.md`; root `README.md` rewritten as the project
+README. README commands verified: `wrangler d1 migrations apply --local`
+(0001 ✅) and table listing (exactly 6 tables).
 
 ## Next Planned Unit
-Unit 7 — Docs: `docs/architecture/overview.md`; move prompt-kit guide from
-root `README.md` to `docs/runbooks/ai-build-kit.md`; write project `README.md`.
+Unit 2 (correction) — minimal Durable Object placeholder: `CoordinatorObject`
+class exported from the Worker, `durable_objects.bindings` + `migrations` tag
+in `wrangler.jsonc`, `COORDINATOR` in `Bindings`. No business logic. Verify
+typecheck, build, `wrangler dev` + `/api/v1/health`.
 
-Remaining after Unit 7: Unit 2 Durable Object placeholder, Unit 8 (final
-STATE.md), and landing Unit 6 on `origin/main` once the permission is fixed.
+Remaining after that: Unit 8 (final STATE.md) and landing Unit 6 on
+`origin/main` once the workflows permission is fixed.
 
 ## Open Questions / Blockers
 - **Unit 6 push blocked.** `git push` of any commit containing
@@ -64,4 +65,4 @@ STATE.md), and landing Unit 6 on `origin/main` once the permission is fixed.
   `9b18951`, `539be11`).
 
 ## Last Updated
-2026-09-22 12:26 UTC — Unit 6 written; push blocked by GitHub App workflows permission
+2026-09-22 12:29 UTC — Unit 7 docs complete

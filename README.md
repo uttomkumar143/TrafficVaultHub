@@ -1,43 +1,146 @@
-TrafficVaultHub — AI Build Kit (README, read this first)
-This folder contains a ready-made "prompt kit" for building your TrafficVaultHub project (CPA Affiliate Network, PRD v10.0) from start to finish. The idea: you build the whole project step by step using the free trial of Claude Fable 5.1 on genspark.com, stay connected to GitHub the whole time, and as soon as a small chunk of work is done it gets committed/pushed to GitHub — so that even if the trial limit or session ends suddenly, none of your work is lost.
-All the prompt files are written in English (code-generating models follow English instructions best and make the fewest mistakes). Only this README and the deployment guide are in Bengali.
----
-What's in this folder
-File	What it's for
-`docs/PRD.md`	Your actual PRD (v10.0), copied as-is. This also needs to live inside the repo.
-`01-MASTER-SYSTEM-PROMPT.md`	The most important file. Paste this at the start of every new chat session. It tells Claude what the project is, what the architecture is, and which rules to follow.
-`02-AUTO-COMMIT-PROTOCOL.md`	The second most important file. Also paste this at the start of every session, right after the master prompt. This is the system that guarantees "auto commit + push as soon as a small unit of work is done," so nothing is lost even if the limit runs out.
-Files `03` through `12`	The project's 9 phases (Phase 0 → Phase 8). Paste the next one once the previous phase is finished.
-`13-DEPLOYMENT-GUIDE-BN.md`	A Bengali step-by-step guide to connecting everything — genspark.com, GitHub, and Cloudflare.
-`STATE-TEMPLATE.md`	Save this as `STATE.md` at the repo root — this is the project's "memory." Claude reads this to understand how far the work has progressed and what's left.
----
-How the whole system works, at a glance
+# TrafficVaultHub
+
+TrafficVaultHub is a performance-marketing / CPA affiliate network platform
+(CPA, CPL, CPI, CPS) that connects advertisers, affiliates/publishers, network
+operations, finance, compliance and support. It provides an offer marketplace,
+tracking and attribution, SmartLinks, conversion validation, fraud detection,
+compliance, an immutable financial ledger, advertiser billing, affiliate
+payouts, reporting, APIs and webhooks. The complete specification is
+[`docs/PRD.md`](docs/PRD.md); a short architecture summary is in
+[`docs/architecture/overview.md`](docs/architecture/overview.md).
+
+**Project status:** Phase 0 (bootstrap skeleton). See
+[`STATE.md`](STATE.md) for the current phase, last completed unit and next
+planned unit — that file is the single source of truth for progress.
+
+## Technology stack
+
+| Layer | Choice |
+|-------|--------|
+| Frontend | React 19 + Vite 7 + TypeScript, Tailwind CSS 4 + shadcn/ui, React Router 7, TanStack Query 5, React Hook Form + Zod, Recharts |
+| Backend | Cloudflare Workers + Hono 4 |
+| Database | Cloudflare D1 (SQLite), SQL migrations in `migrations/` |
+| Coordination / cache / storage / async | Durable Objects, Cloudflare KV, Cloudflare R2, Cloudflare Queues |
+| API | REST, versioned under `/api/v1` |
+| Testing | Vitest (backend: Hono `app.request()`; frontend: jsdom + Testing Library) |
+| CI | GitHub Actions (`.github/workflows/ci.yml`) |
+
+## Repository structure
+
 ```
-Every time you start a new session:
-  1) Paste 01-MASTER-SYSTEM-PROMPT.md
-  2) Paste 02-AUTO-COMMIT-PROTOCOL.md
-  3) Send this: "First, read docs/PRD.md and STATE.md from the repo, then tell me
-      exactly what phase we are on and what you'll do next."
-  4) Claude reads STATE.md and tells you which phase you're currently on
-  5) Paste that phase's prompt file (03/04/05...)
-  6) Claude does the work — after every small unit is finished, it
-     git commits + pushes on its own and updates STATE.md
-  7) If the limit runs out / the session cuts off — no problem.
-     Everything up to the last commit is already saved on GitHub.
-  8) Open a new session and start again from step 1 — Claude will read
-     STATE.md and continue exactly where it left off.
+.
+├── frontend/                 React + Vite SPA (own package.json)
+│   └── src/{app,components,features,hooks,lib,routes,types,test}/
+├── backend/                  Cloudflare Worker + Hono API (own package.json)
+│   ├── src/{modules,middleware,integrations,workers,lib,routes}/
+│   └── wrangler.jsonc        Worker config + placeholder bindings
+├── migrations/               D1 SQL migrations (0001_initial.sql, …)
+├── tests/                    Cross-cutting / e2e tests (empty in Phase 0)
+├── docs/
+│   ├── PRD.md                Master product requirements (source of truth)
+│   ├── architecture/         Architecture overview
+│   ├── adr/  api/            Decision records, API docs (as they are written)
+│   └── runbooks/             Operational guides, incl. the AI build-kit guide
+├── scripts/                  Helper scripts (secret-scan.sh)
+├── .github/workflows/ci.yml  CI pipeline
+├── STATE.md                  Project memory: current phase / next unit
+├── 01-…13-*.md               AI build-kit prompt files (see docs/runbooks/ai-build-kit.md)
+└── README.md
 ```
-This loop is your real "safety net" — running out of limit or credits isn't a problem, because:
-Work never lives only in Claude's chat memory; it always lives on GitHub.
-`STATE.md` acts as the "briefing note" for the next session.
----
-Steps to use this (in brief)
-Create a new private repo on GitHub — name it `trafficvaulthub`.
-Commit this folder's `docs/PRD.md` and `STATE-TEMPLATE.md` (renamed to `STATE.md`) to the repo root — right at the start.
-Follow `13-DEPLOYMENT-GUIDE-BN.md` to set up Claude Fable 5.1 on genspark.com and connect GitHub + Cloudflare.
-Follow the "at a glance" section above, step by step.
----
-Important warnings
-Never paste secrets/API keys into the chat. Put them in genspark's or GitHub's "Secrets/Environment Variables" section instead — this is also stated in `02-AUTO-COMMIT-PROTOCOL.md` and `13-DEPLOYMENT-GUIDE-BN.md`.
-Free trial/limit terms are set by genspark and Anthropic themselves and can change — this kit only makes sure your work is never lost, it doesn't increase your limits.
-If any phase's prompt is large, Claude will break it into smaller sub-tasks on its own and commit one at a time — this rule is written in file `02`.
+
+`frontend/` and `backend/` are independent npm projects; there is no
+monorepo tooling. Run commands from inside each directory.
+
+## Local development
+
+Prerequisites: Node.js 22 and npm 10.
+
+### Backend (Cloudflare Worker)
+
+```bash
+cd backend
+npm ci
+npm run dev          # wrangler dev on http://127.0.0.1:8787
+curl http://127.0.0.1:8787/api/v1/health   # → {"status":"ok"}
+```
+
+Local secrets (none required in Phase 0) go in `backend/.dev.vars`, which is
+git-ignored; see `backend/.dev.vars.example`. All resource IDs in
+`backend/wrangler.jsonc` are placeholders — no Cloudflare account is
+configured yet.
+
+### Frontend (React + Vite)
+
+```bash
+cd frontend
+npm ci
+npm run dev          # Vite on http://localhost:5173, proxies /api → :8787
+```
+
+Start the backend first so the home page's backend connectivity probe
+succeeds.
+
+### Local D1 migrations
+
+Migrations live in `migrations/` and are applied through Wrangler from the
+`backend/` directory (its `wrangler.jsonc` points `migrations_dir` at
+`../migrations`). Local mode uses an automatic SQLite database under
+`backend/.wrangler/` and needs no Cloudflare credentials.
+
+```bash
+cd backend
+npx wrangler d1 migrations apply trafficvaulthub-db --local
+npx wrangler d1 execute trafficvaulthub-db --local \
+  --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+```
+
+Applied migrations are immutable — never edit an existing file; add a new
+numbered one (see `migrations/README.md`).
+
+## Testing
+
+```bash
+cd backend  && npm test     # Vitest: GET /api/v1/health smoke test
+cd frontend && npm test     # Vitest + jsdom: app shell / home page render test
+```
+
+Typecheck:
+
+```bash
+cd backend  && npm run typecheck
+cd frontend && npm run typecheck
+```
+
+## Build
+
+```bash
+cd backend  && npm run build   # wrangler deploy --dry-run --outdir dist (bundle only, no upload)
+cd frontend && npm run build   # vite build → frontend/dist
+```
+
+CI (`.github/workflows/ci.yml`) runs `npm ci`, `typecheck`, `test` and
+`build` for both projects on every push and pull request. It requires no
+secrets. (If the workflow file is not yet present on `main`, see the
+blockers section of `STATE.md`.)
+
+## Deployment
+
+Not configured in Phase 0. The deployment target (Cloudflare account,
+resource IDs, secrets) is an open item tracked in `STATE.md`; see
+`12-PHASE9-DEPLOYMENT-CLOUDFLARE.md` and `13-DEPLOYMENT-GUIDE-BN.md` for the
+planned procedure.
+
+## Security notes
+
+* Never commit secrets. `.env*`, `.dev.vars*` (except `*.example`) are
+  git-ignored; run `scripts/secret-scan.sh` before committing.
+* Authorization, tenant ownership and all financial computation are
+  server-side only (PRD §4–§5).
+
+## Working on this repository with an AI agent
+
+This project is built incrementally by AI coding sessions following the
+prompt kit in the repository root (`01-MASTER-SYSTEM-PROMPT.md`,
+`02-AUTO-COMMIT-PROTOCOL.md`, phase prompts `03`–`12`). The usage guide for
+that kit is preserved in
+[`docs/runbooks/ai-build-kit.md`](docs/runbooks/ai-build-kit.md).
