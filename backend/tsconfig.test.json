@@ -1,0 +1,11 @@
+{
+  // Typecheck configuration for test files only. Tests run under Node
+  // (vitest) and use `node:sqlite` for the D1 shim, so Node types are added
+  // here without leaking them into the production Worker typecheck.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types", "node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", ".wrangler"]
+}

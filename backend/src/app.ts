@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./lib/bindings";
+import { errorResponse } from "./lib/errors";
 import { healthRoutes } from "./routes/health";
 
 /**
@@ -24,18 +25,8 @@ export function createApp() {
     ),
   );
 
-  app.onError((_err, c) =>
-    c.json(
-      {
-        error: {
-          code: "INTERNAL_ERROR",
-          message: "An unexpected error occurred",
-          request_id: c.req.header("cf-ray") ?? null,
-        },
-      },
-      500,
-    ),
-  );
+  // AppError → its own status/code; anything else → 500 without details.
+  app.onError((err, c) => errorResponse(err, c));
 
   // API v1 (PRD §70)
   const v1 = new Hono<AppEnv>();
