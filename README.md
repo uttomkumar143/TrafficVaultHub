@@ -23,7 +23,7 @@ planned unit — that file is the single source of truth for progress.
 | Coordination / cache / storage / async | Durable Objects, Cloudflare KV, Cloudflare R2, Cloudflare Queues |
 | API | REST, versioned under `/api/v1` |
 | Testing | Vitest (backend: Hono `app.request()`; frontend: jsdom + Testing Library) |
-| CI | GitHub Actions (`.github/workflows/ci.yml`) |
+| CI | GitHub Actions (`ci.yml`; see `.github/workflows-pending/README.md` for activation status) |
 
 ## Repository structure
 
@@ -42,7 +42,7 @@ planned unit — that file is the single source of truth for progress.
 │   ├── adr/  api/            Decision records, API docs (as they are written)
 │   └── runbooks/             Operational guides, incl. the AI build-kit guide
 ├── scripts/                  Helper scripts (secret-scan.sh)
-├── .github/workflows/ci.yml  CI pipeline
+├── .github/workflows-pending/ CI pipeline (ci.yml) awaiting manual move to .github/workflows/
 ├── STATE.md                  Project memory: current phase / next unit
 ├── 01-…13-*.md               AI build-kit prompt files (see docs/runbooks/ai-build-kit.md)
 └── README.md
@@ -118,10 +118,13 @@ cd backend  && npm run build   # wrangler deploy --dry-run --outdir dist (bundle
 cd frontend && npm run build   # vite build → frontend/dist
 ```
 
-CI (`.github/workflows/ci.yml`) runs `npm ci`, `typecheck`, `test` and
-`build` for both projects on every push and pull request. It requires no
-secrets. (If the workflow file is not yet present on `main`, see the
-blockers section of `STATE.md`.)
+CI (`ci.yml`) runs `npm ci`, `typecheck`, `test` and `build` for both
+projects plus `scripts/secret-scan.sh` on every push and pull request. It
+requires no secrets. **Activation status:** the validated file currently sits
+at `.github/workflows-pending/ci.yml` because the GitHub App token used by the
+AI build sessions may not write to `.github/workflows/`. A human must move it
+(`git mv .github/workflows-pending/ci.yml .github/workflows/ci.yml`) — see
+`.github/workflows-pending/README.md` and the blockers section of `STATE.md`.
 
 ## Deployment
 
