@@ -5,22 +5,25 @@
 ## Current Phase
 Phase 0 — Bootstrap
 
-Status: IN PROGRESS. Phase 0 execution prompt received 2026-09-22. No Phase 0
-unit has been completed yet. Phase 0 is NOT complete.
+Status: IN PROGRESS. Phase 0 is NOT complete.
+
+Phase 0 unit status (verified by repository audit, 2026-09-22):
+
+| Unit | Scope | Status |
+|------|-------|--------|
+| 1 | Repo scaffolding, `docs/PRD.md`, `.gitignore` | COMPLETE |
+| 2 | Backend skeleton (Workers + Hono, `/api/v1/health`, wrangler bindings) | PARTIAL — Durable Object binding is only a commented example in `backend/wrangler.jsonc`; no `CoordinatorObject` class exported. D1/KV/R2/Queues placeholders are present. |
+| 3 | Frontend skeleton (React + Vite + TS, Tailwind, shadcn/ui, Router, TanStack Query, shell) | COMPLETE |
+| 4 | `migrations/0001_initial.sql` (six foundational tables) | COMPLETE — applied locally; immutable |
+| 5 | Testing setup (Vitest smoke tests, backend + frontend) | MISSING |
+| 6 | CI skeleton (`.github/workflows/ci.yml`) | MISSING |
+| 7 | Docs (root `README.md`, `docs/architecture/overview.md`) | PARTIAL — root README is the prompt-kit usage guide, not a project README; `docs/architecture/` is empty |
+| 8 | STATE.md reflecting Phase 0 complete, next unit = Phase 1 | PARTIAL — this file exists and is maintained, but Phase 0 is not complete |
 
 ## Last Completed Unit
-Unit 4 — Foundational Database Migration
-
-- `migrations/0001_initial.sql`: ONLY `organizations`, `users`, `roles`,
-  `permissions`, `role_permissions`, `organization_members`. TEXT UUID PKs,
-  UTC ISO-8601 timestamps, FKs with ON DELETE rules, CHECK constraints on
-  enums, case-insensitive unique email, tenant-scoped role keys, 15 indexes.
-  No money fields. No seed data. `migrations/README.md` added.
-- Validated: Python sqlite3 (3.46.1) `executescript` PASS; constraint tests
-  (CHECK/FK/UNIQUE) enforced; idempotent re-run PASS; zero money-like columns.
-  `wrangler d1 migrations apply trafficvaulthub-db --local` → 23 commands
-  executed, migration marked ✅; local D1 lists exactly the 6 tables.
-  Secret scan CLEAN.
+Unit 4 — Foundational Database Migration (`migrations/0001_initial.sql`,
+validated with sqlite3 and `wrangler d1 migrations apply --local`; exactly six
+tables; no money fields; no seed data).
 
 ## Next Planned Unit
 Unit 5 — Testing Setup
@@ -29,20 +32,29 @@ Scope: Vitest in `backend/` (health endpoint returns `{"status":"ok"}` via
 `createApp().request()`) and `frontend/` (app shell/home renders, jsdom +
 Testing Library). Add `test` scripts; run and confirm pass.
 
+Remaining after Unit 5: Unit 6 (CI), Unit 7 (docs), Unit 2 Durable Object
+placeholder, Unit 8 (final STATE.md).
+
 ## Open Questions / Blockers
-- `PRD.md` ends mid-sentence at line 581 ("Advertiser experience shoul").
-  This truncation is present in every historical version (c029031, README@a1ed617),
-  so it is the original committed content. PRD will be moved, not edited.
+- `docs/PRD.md` ends mid-sentence at line 581 ("Advertiser experience shoul").
+  This truncation is present in every historical version, so it is the original
+  committed content. PRD is not edited.
 - Cloudflare: NOT CONFIGURED. Deployment target (Genspark-hosted vs. own
   Cloudflare account) undecided. Phase 0 uses placeholder bindings only.
 - Package manager strategy: separate `frontend/` and `backend/` npm projects
-  (no monorepo tooling) unless the PRD requires otherwise — decided for Unit 1+.
+  (no monorepo tooling).
 
 ## Notes for the Next Session
 - Read `docs/PRD.md` — esp. §119–§121.
 - Loop after every unit: WORK → VALIDATE → SECRET SCAN → UPDATE STATE.md →
   COMMIT → PUSH → VERIFY → NEXT UNIT.
-- See `docs/BUILD_PROGRESS.md` for the recovery audit.
+- `docs/BUILD_PROGRESS.md` is a HISTORICAL snapshot from the 2026-09-22
+  recovery session (written before any application code existed). It is
+  STALE and must NOT be treated as current project state. This file
+  (`STATE.md`) is the only current-state source.
+- The prompt-kit files (`01-MASTER-SYSTEM-PROMPT.md` … `13-DEPLOYMENT-GUIDE-BN.md`,
+  `STATE-TEMPLATE.md`) now exist in the repository root (added in commits
+  `9b18951`, `539be11`).
 
 ## Last Updated
-2026-09-22 09:00 UTC — Unit 4 complete
+2026-09-22 12:18 UTC — STATE.md corrected after Phase 0 audit
