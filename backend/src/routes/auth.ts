@@ -10,11 +10,18 @@
  * POST /reset-password       → 204
  * GET  /me                   → 200 { user, session } (auth required)
  * GET  /mfa                  → 200 { mfa }        (auth required; stub status)
+ *
+ * Session & device management (Phase 1 Unit 2) — all auth required, all
+ * scoped to the caller's own sessions:
+ * GET    /sessions                → 200 { sessions: [{ id, created_at, last_seen_at,
+ *                                          expires_at, ip_address, user_agent, current }] }
+ * DELETE /sessions/:id            → 204 · 404 SESSION_NOT_FOUND (unknown OR foreign id)
+ * POST   /sessions/revoke-others  → 200 { revoked_count }   (current session kept)
  */
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../lib/bindings";
-import { requestId } from "../lib/errors";
+import { AppError, requestId } from "../lib/errors";
 import { parseJsonBody } from "../lib/validation";
 import { requireAuth } from "../middleware/require-auth";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../modules/auth/constants";
@@ -33,6 +40,8 @@ const emailOnlySchema = z.object({ email: emailSchema });
 const tokenOnlySchema = z.object({ token: tokenSchema });
 const loginSchema = z.object({ email: emailSchema, password: z.string().min(1).max(PASSWORD_MAX_LENGTH) });
 const resetSchema = z.object({ token: tokenSchema, password: passwordSchema });
+/** Session ids are application-generated UUIDs (migration 0002). */
+const sessionIdSchema = z.string().uuid();
 
 function meta(c: { req: { header(name: string): string | undefined } }): RequestMeta {
   return {
@@ -93,4 +102,27 @@ authRoutes.get("/me", requireAuth, (c) => {
 authRoutes.get("/mfa", requireAuth, (c) => {
   // Explicit stub: reports MFA as not yet available (ADR-001 §5).
   return c.json({ mfa: c.get("auth").user.mfa }, 200);
+});
+
+// ---- session & device management (Unit 2) ----------------------------------
+
+authRoutes.get("/sessions", requireAuth, async (c) => {
+  const sessions = await c.get("authService").listSessions(c.get("auth"));
+  return c.json({ sessions }, 200);
+});
+
+authRoutes.post("/sessions/revoke-others", requireAuth, async (c) => {
+  const result = await c.get("authService").revokeOtherSessions(c.get("auth"), meta(c));
+  return c.json(result, 200);
+});
+
+authRoutes.delete("/sessions/:id", requireAuth, async (c) => {
+  // A malformed id can never match a session, so it is indistinguishable
+  // from an unknown one — answer 404 rather than 400 to keep one code path.
+  const parsed = sessionIdSchema.safeParse(c.req.param("id"));
+  if (!parsed.success) {
+    throw new AppError(404, "SESSION_NOT_FOUND", "Session not found");
+  }
+  await c.get("authService").revokeSession(c.get("auth"), parsed.data, meta(c));
+  return c.body(null, 204);
 });

@@ -207,6 +207,59 @@ export class AuthRepository {
     return res.meta.changes ?? 0;
   }
 
+  // ---- session & device management (Unit 2) --------------------------------
+  // Every query below is scoped by `user_id` so a caller can never read or
+  // mutate another principal's sessions, whatever session id it supplies.
+
+  /** Active = not revoked and not yet expired. Most recently used first. */
+  async listActiveSessions(userId: string): Promise<SessionRow[]> {
+    const res = await this.db
+      .prepare(
+        `SELECT id, user_id, token_hash, created_at, last_seen_at, expires_at, revoked_at, revoked_reason, ip_address, user_agent
+           FROM sessions
+          WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?
+          ORDER BY last_seen_at DESC, created_at DESC`,
+      )
+      .bind(userId, nowIso())
+      .all<SessionRow>();
+    return res.results;
+  }
+
+  /**
+   * Revoke one session that belongs to `userId`. Returns true only if an
+   * active session matched — an unknown, foreign, already-revoked or expired
+   * id all yield false so the caller can answer "not found" uniformly.
+   */
+  async revokeOwnedSession(userId: string, sessionId: string, reason: string): Promise<boolean> {
+    const now = nowIso();
+    const res = await this.db
+      .prepare(
+        `UPDATE sessions SET revoked_at = ?, revoked_reason = ?
+          WHERE id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?`,
+      )
+      .bind(now, reason, sessionId, userId, now)
+      .run();
+    return (res.meta.changes ?? 0) === 1;
+  }
+
+  /**
+   * Revoke every active session of `userId` except `currentSessionId`.
+   * Idempotent. Returns the ids that were revoked (for the audit trail); the
+   * SELECT and UPDATE share one predicate and run in a single D1 batch
+   * (transaction), so the returned ids are exactly the rows updated.
+   */
+  async revokeOtherSessions(userId: string, currentSessionId: string, reason: string): Promise<string[]> {
+    const now = nowIso();
+    const predicate = "user_id = ? AND id <> ? AND revoked_at IS NULL AND expires_at > ?";
+    const [selected] = await this.db.batch<{ id: string }>([
+      this.db.prepare(`SELECT id FROM sessions WHERE ${predicate}`).bind(userId, currentSessionId, now),
+      this.db
+        .prepare(`UPDATE sessions SET revoked_at = ?, revoked_reason = ? WHERE ${predicate}`)
+        .bind(now, reason, userId, currentSessionId, now),
+    ]);
+    return (selected?.results ?? []).map((r) => r.id);
+  }
+
   // ---- one-time tokens -----------------------------------------------------
 
   /** Issues a token and invalidates prior unconsumed tokens of the same purpose. */

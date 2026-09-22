@@ -51,8 +51,22 @@ providers later.
   visibility, which JWTs cannot provide without a server-side deny-list — at
   which point the server-side session is simpler and safer.
 - Lifetime: 30 days absolute (`SESSION_TTL_SECONDS`, configurable via vars);
-  sliding `last_seen_at` update on each authenticated request. Idle timeout
-  and device management arrive in Unit 2.
+  sliding `last_seen_at` update on each authenticated request. No idle
+  timeout (not introduced in Unit 2; revisit with rate limiting in Phase 8).
+- **Session & device management (Unit 2, 2026-09-22):** implemented on this
+  same table with no schema change. `GET /auth/sessions` lists the caller's
+  *active* rows (`revoked_at IS NULL AND expires_at > now`) with the safe
+  fields only (`id, created_at, last_seen_at, expires_at, ip_address,
+  user_agent, current`); `DELETE /auth/sessions/:id` and
+  `POST /auth/sessions/revoke-others` are UPDATEs whose predicate always
+  includes `user_id = <authenticated user>`, so a foreign or unknown id is
+  indistinguishable (`404 SESSION_NOT_FOUND`, never 403) and other users'
+  rows can never be touched. Revocation reasons: `LOGOUT`, `USER_REVOKED`,
+  `REVOKE_OTHERS`, `PASSWORD_RESET`. Each user-initiated revocation is
+  recorded as a `LOGOUT` auth event for the affected session. "Device" is
+  the stored `ip_address` + `user_agent` captured at login — no
+  fingerprinting; a user-editable device label would need an additive
+  migration and is not in scope.
 
 ### 3. Email verification & password reset
 

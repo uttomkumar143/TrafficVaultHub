@@ -9,7 +9,8 @@ payouts, reporting, APIs and webhooks. The complete specification is
 [`docs/PRD.md`](docs/PRD.md); a short architecture summary is in
 [`docs/architecture/overview.md`](docs/architecture/overview.md).
 
-**Project status:** Phase 0 (bootstrap skeleton). See
+**Project status:** Phase 1 in progress — Units 1 (auth foundation) and 2
+(session & device management) complete; API under `/api/v1/auth`. See
 [`STATE.md`](STATE.md) for the current phase, last completed unit and next
 planned unit — that file is the single source of truth for progress.
 

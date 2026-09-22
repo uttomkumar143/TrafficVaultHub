@@ -6,7 +6,10 @@
  * Error codes (uniform envelope, PRD §72):
  *   EMAIL_ALREADY_REGISTERED 409 · INVALID_CREDENTIALS 401 ·
  *   EMAIL_NOT_VERIFIED 403 · ACCOUNT_INACTIVE 403 · INVALID_TOKEN 400 ·
- *   UNAUTHENTICATED 401
+ *   UNAUTHENTICATED 401 · SESSION_NOT_FOUND 404
+ *
+ * Session & device management (Unit 2): listSessions / revokeSession /
+ * revokeOtherSessions operate strictly on the authenticated user's own rows.
  */
 import { AppError } from "../../lib/errors";
 import { isExpired, plusSecondsIso } from "../../lib/time";
@@ -45,6 +48,14 @@ export interface SessionInfo {
   created_at: string;
   last_seen_at: string;
   expires_at: string;
+}
+
+/** Safe device/session view for session management. Never carries token material. */
+export interface SessionListItem extends SessionInfo {
+  ip_address: string | null;
+  user_agent: string | null;
+  /** True for the session that authenticated the current request. */
+  current: boolean;
 }
 
 export interface AuthenticatedContext {
@@ -198,6 +209,43 @@ export class AuthService {
     });
   }
 
+  // ---- session & device management (Unit 2) --------------------------------
+
+  /** Active sessions of the caller, flagging the one used for this request. */
+  async listSessions(ctx: AuthenticatedContext): Promise<SessionListItem[]> {
+    const rows = await this.repo.listActiveSessions(ctx.user.id);
+    return rows.map((s) => toSessionListItem(s, s.id === ctx.session.id));
+  }
+
+  /**
+   * Revoke one of the caller's own sessions (the current one included — that
+   * is equivalent to logout). Any id that is not an active session of this
+   * user — unknown, foreign, revoked or expired — is reported as
+   * SESSION_NOT_FOUND so existence of other users' sessions is never disclosed.
+   */
+  async revokeSession(ctx: AuthenticatedContext, sessionId: string, meta: RequestMeta): Promise<void> {
+    const revoked = await this.repo.revokeOwnedSession(ctx.user.id, sessionId, "USER_REVOKED");
+    if (!revoked) {
+      throw new AppError(404, "SESSION_NOT_FOUND", "Session not found");
+    }
+    // Audit trail: a user-initiated revocation is a logout of that session.
+    await this.repo.recordAuthEvent({
+      user_id: ctx.user.id,
+      event_type: "LOGOUT",
+      session_id: sessionId,
+      meta,
+    });
+  }
+
+  /** Revoke all the caller's other active sessions; the current one survives. Idempotent. */
+  async revokeOtherSessions(ctx: AuthenticatedContext, meta: RequestMeta): Promise<{ revoked_count: number }> {
+    const revokedIds = await this.repo.revokeOtherSessions(ctx.user.id, ctx.session.id, "REVOKE_OTHERS");
+    for (const sessionId of revokedIds) {
+      await this.repo.recordAuthEvent({ user_id: ctx.user.id, event_type: "LOGOUT", session_id: sessionId, meta });
+    }
+    return { revoked_count: revokedIds.length };
+  }
+
   // ---- password reset ------------------------------------------------------
 
   /** Always resolves — response is identical whether or not the email exists. */
@@ -278,4 +326,9 @@ export function toPublicUser(u: UserRow): PublicUser {
 
 function toSessionInfo(s: SessionRow): SessionInfo {
   return { id: s.id, created_at: s.created_at, last_seen_at: s.last_seen_at, expires_at: s.expires_at };
+}
+
+/** Explicit field allow-list: `token_hash`, `revoked_*` never reach the client. */
+function toSessionListItem(s: SessionRow, current: boolean): SessionListItem {
+  return { ...toSessionInfo(s), ip_address: s.ip_address, user_agent: s.user_agent, current };
 }
