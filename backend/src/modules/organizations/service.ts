@@ -7,9 +7,13 @@
  *     caller's own ACTIVE membership. An id the caller is not a member of —
  *     or that does not exist — is `404 ORGANIZATION_NOT_FOUND`. Never 403,
  *     so tenant ids cannot be enumerated.
- *   * Management operations (update org, add/change/remove members) require
- *     the caller to hold the owner role of that organization (Unit 4 refines
- *     this into permission keys on the same data).
+ *   * Since Unit 4, tenant scope + permission checks run in middleware
+ *     (`requireOrg` + `requirePermission`, `middleware/require-org.ts`) and
+ *     the resolved `TenantContext` is passed in. Management endpoints need
+ *     `organizations.update` / `members.manage`; reads need `*.read`.
+ *   * Touching an OWNER seat (granting an owner role, or changing/removing an
+ *     existing owner) additionally requires the caller to hold the owner role
+ *     — a permission key alone is not enough (migration 0004 grant policy).
  *   * Clients never supply `user_id`, `organization_id` for themselves, or
  *     `role_id`. Members are addressed by email; roles by PRD §9 key and
  *     validated against `role_org_types`.
@@ -21,6 +25,7 @@
  */
 import { AppError } from "../../lib/errors";
 import { AuditRepository } from "../audit/repository";
+import type { TenantContext } from "../../middleware/require-org";
 import type { RequestMeta } from "../auth/repository";
 import type { AuthenticatedContext } from "../auth/service";
 import type {
@@ -133,17 +138,38 @@ export class OrganizationService {
     return rows.map(toPublicOrganization);
   }
 
-  async get(ctx: AuthenticatedContext, organizationId: string): Promise<PublicOrganization> {
-    return toPublicOrganization(await this.requireMembership(ctx, organizationId));
+  /**
+   * RBAC resolution used by `requireOrg` (Unit 4): user → ACTIVE membership →
+   * role → permission keys. Returns null when the caller is not an ACTIVE
+   * member (the middleware turns that into 404, no enumeration).
+   */
+  async resolveTenant(ctx: AuthenticatedContext, organizationId: string): Promise<TenantContext | null> {
+    const org = await this.repo.findForMember(ctx.user.id, organizationId);
+    if (!org) return null;
+    const permissions = await this.repo.listPermissionKeysForRole(org.role_id);
+    return {
+      organization: { id: org.id, type: org.type, name: org.name, slug: org.slug, status: org.status },
+      membership: { id: org.membership_id, joined_at: org.joined_at },
+      role: { id: org.role_id, key: org.role_key, is_owner: org.role_is_owner === 1 },
+      permissions: new Set(permissions),
+    };
   }
 
+  /** The caller's view of a tenant already resolved by `requireOrg`. */
+  async get(ctx: AuthenticatedContext, tenant: TenantContext): Promise<PublicOrganization> {
+    const org = await this.repo.findForMember(ctx.user.id, tenant.organization.id);
+    if (!org) throw new AppError(404, "ORGANIZATION_NOT_FOUND", "Organization not found");
+    return toPublicOrganization(org);
+  }
+
+  /** Requires `organizations.update` (enforced by middleware). */
   async update(
     ctx: AuthenticatedContext,
-    organizationId: string,
+    tenant: TenantContext,
     input: { name: string },
     meta: RequestMeta,
   ): Promise<PublicOrganization> {
-    const org = await this.requireOwner(ctx, organizationId);
+    const org = tenant.organization;
     const name = input.name.trim();
     await this.repo.updateName(org.id, name, [
       this.audit.statement({
@@ -162,16 +188,15 @@ export class OrganizationService {
   }
 
   /** Roles a manager may assign inside this organization (type-filtered). */
-  async listAssignableRoles(ctx: AuthenticatedContext, organizationId: string): Promise<PublicRole[]> {
-    const org = await this.requireMembership(ctx, organizationId);
-    return (await this.repo.listSystemRolesForType(org.type)).map(toPublicRole);
+  async listAssignableRoles(tenant: TenantContext): Promise<PublicRole[]> {
+    return (await this.repo.listSystemRolesForType(tenant.organization.type)).map(toPublicRole);
   }
 
   // ---- members -------------------------------------------------------------
 
-  async listMembers(ctx: AuthenticatedContext, organizationId: string): Promise<PublicMember[]> {
-    const org = await this.requireMembership(ctx, organizationId);
-    return (await this.repo.listMembers(org.id)).map(toPublicMember);
+  /** Requires `members.read` (enforced by middleware). */
+  async listMembers(tenant: TenantContext): Promise<PublicMember[]> {
+    return (await this.repo.listMembers(tenant.organization.id)).map(toPublicMember);
   }
 
   /**
@@ -180,12 +205,14 @@ export class OrganizationService {
    */
   async addMember(
     ctx: AuthenticatedContext,
-    organizationId: string,
+    tenant: TenantContext,
     input: { email: string; role: string },
     meta: RequestMeta,
   ): Promise<PublicMember> {
-    const org = await this.requireOwner(ctx, organizationId);
+    const org = tenant.organization;
     const role = await this.requireAssignableRole(input.role, org.type);
+    // Granting an owner seat is reserved to owners (privilege-escalation guard).
+    if (role.is_owner === 1) this.assertOwner(tenant);
 
     const user = await this.repo.findUserIdByEmail(input.email.trim().toLowerCase());
     if (!user) {
@@ -230,16 +257,19 @@ export class OrganizationService {
 
   async changeMemberRole(
     ctx: AuthenticatedContext,
-    organizationId: string,
+    tenant: TenantContext,
     membershipId: string,
     input: { role: string },
     meta: RequestMeta,
   ): Promise<PublicMember> {
-    const org = await this.requireOwner(ctx, organizationId);
+    const org = tenant.organization;
     const member = await this.requireMember(org.id, membershipId);
     const role = await this.requireAssignableRole(input.role, org.type);
 
     if (member.role_id !== role.id) {
+      // Only owners may touch owner seats — either granting one or changing
+      // the role of an existing owner (a manager must not demote their owner).
+      if (role.is_owner === 1 || member.role_is_owner === 1) this.assertOwner(tenant);
       // Demoting the last owner would orphan the tenant (ADR-002 §2).
       if (member.role_is_owner === 1 && role.is_owner === 0) {
         await this.assertNotLastOwner(org.id);
@@ -264,11 +294,11 @@ export class OrganizationService {
 
   async removeMember(
     ctx: AuthenticatedContext,
-    organizationId: string,
+    tenant: TenantContext,
     membershipId: string,
     meta: RequestMeta,
   ): Promise<void> {
-    const org = await this.requireOwner(ctx, organizationId);
+    const org = tenant.organization;
     const member = await this.requireMember(org.id, membershipId);
 
     if (member.user_id === ctx.user.id) {
@@ -277,6 +307,7 @@ export class OrganizationService {
       throw new AppError(400, "SELF_MODIFICATION", "You cannot remove your own membership");
     }
     if (member.role_is_owner === 1) {
+      this.assertOwner(tenant);
       await this.assertNotLastOwner(org.id);
     }
 
@@ -295,28 +326,14 @@ export class OrganizationService {
 
   // ---- guards --------------------------------------------------------------
 
-  /** Caller must be an ACTIVE member; otherwise 404 (no enumeration). */
-  private async requireMembership(
-    ctx: AuthenticatedContext,
-    organizationId: string,
-  ): Promise<OrganizationWithMembershipRow> {
-    const org = await this.repo.findForMember(ctx.user.id, organizationId);
-    if (!org) {
-      throw new AppError(404, "ORGANIZATION_NOT_FOUND", "Organization not found");
+  /**
+   * Owner-seat operations need the owner role itself, on top of
+   * `members.manage` (migration 0004 grant policy; ADR-002 §5).
+   */
+  private assertOwner(tenant: TenantContext): void {
+    if (!tenant.role.is_owner) {
+      throw new AppError(403, "FORBIDDEN", "Only an organization owner may grant or change owner roles");
     }
-    return org;
-  }
-
-  /** Caller must be an ACTIVE member holding the owner role; otherwise 403. */
-  private async requireOwner(
-    ctx: AuthenticatedContext,
-    organizationId: string,
-  ): Promise<OrganizationWithMembershipRow> {
-    const org = await this.requireMembership(ctx, organizationId);
-    if (org.role_is_owner !== 1) {
-      throw new AppError(403, "FORBIDDEN", "Only an organization owner may perform this action");
-    }
-    return org;
   }
 
   private async requireMember(organizationId: string, membershipId: string): Promise<MemberRow> {

@@ -107,6 +107,24 @@ export class OrganizationRepository {
     return res.results;
   }
 
+  /**
+   * Permission keys granted to a role (Unit 4 RBAC). Read per request so a
+   * grant change via migration takes effect immediately; no caching of
+   * authority decisions.
+   */
+  async listPermissionKeysForRole(roleId: string): Promise<string[]> {
+    const res = await this.db
+      .prepare(
+        `SELECT p.key
+           FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
+          WHERE rp.role_id = ?
+          ORDER BY p.key`,
+      )
+      .bind(roleId)
+      .all<{ key: string }>();
+    return res.results.map((r) => r.key);
+  }
+
   // ---- organizations -------------------------------------------------------
 
   slugExists(slug: string): Promise<boolean> {

@@ -2,6 +2,7 @@
  * Worker environment bindings.
  * Mirrors `wrangler.jsonc`. Keep in sync when bindings change.
  */
+import type { TenantContext } from "../middleware/require-org";
 import type { AuthService, AuthenticatedContext } from "../modules/auth/service";
 import type { OrganizationService } from "../modules/organizations/service";
 
@@ -28,6 +29,8 @@ export interface Variables {
   organizationService: OrganizationService;
   /** Present only after `requireAuth` has run. */
   auth: AuthenticatedContext;
+  /** Present only after `requireOrg` has run (RBAC + tenant scope, Unit 4). */
+  tenant: TenantContext;
 }
 
 export type AppEnv = { Bindings: Bindings; Variables: Variables };

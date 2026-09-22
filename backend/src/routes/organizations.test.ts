@@ -2,9 +2,10 @@
  * Phase 1 Unit 3 — Organizations CRUD + membership.
  * Exercises HTTP route → requireAuth → OrganizationService →
  * OrganizationRepository → D1 (node:sqlite shim running the real migrations
- * 0001–0003). Also covers the Unit 3 slice of PRD §116: a member of tenant A
- * can never read or manage tenant B (404, no enumeration), and a non-owner
- * cannot perform management actions (403).
+ * 0001–0004). Also covers the Unit 3/4 slice of PRD §116: a member of tenant A
+ * can never read or manage tenant B (404, no enumeration), and a role without
+ * the required permission key cannot perform management actions (403).
+ * Dedicated RBAC middleware tests live in `rbac.test.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app";
@@ -97,6 +98,7 @@ async function errorCode(res: Response): Promise<string> {
 const ALICE = "alice@example.com";
 const BOB = "bob@example.com";
 const CAROL = "carol@example.com";
+const DAVE = "dave@example.com";
 const RANDOM_ID = "11111111-2222-4333-8444-555555555555";
 
 describe("POST /organizations — create", () => {
@@ -332,42 +334,73 @@ describe("members — add / list / change role / remove", () => {
     expect(self.status).toBe(409);
   });
 
-  it("non-owner cannot add/change/remove members (403); non-member gets 404", async () => {
+  it("manager (members.manage) can add non-owner members but never touch owner seats; VIEWER gets 403; non-member gets 404", async () => {
     const alice = await user(ALICE);
     const bob = await user(BOB);
     const carol = await user(CAROL);
+    const dave = await user(DAVE);
     const org = await createOrg(alice, { type: "AFFILIATE", name: "Traffic" });
     const bobMember = await addMember(alice, org.id, BOB, "AFFILIATE_MANAGER");
+    const daveMember = await addMember(alice, org.id, DAVE, "VIEWER");
 
+    // AFFILIATE_MANAGER holds members.manage (migration 0004) → may add a non-owner.
     const add = await api("POST", `/organizations/${org.id}/members`, bearer(bob), { email: CAROL, role: "VIEWER" });
-    expect(add.status).toBe(403);
-    expect(await errorCode(add)).toBe("FORBIDDEN");
+    expect(add.status).toBe(201);
 
-    const promote = await api("PATCH", `/organizations/${org.id}/members/${bobMember.id}`, bearer(bob), {
+    // …but granting an owner seat requires the owner role itself (escalation guard).
+    const grantOwner = await api("PATCH", `/organizations/${org.id}/members/${bobMember.id}`, bearer(bob), {
       role: "AFFILIATE_OWNER",
     });
-    expect(promote.status).toBe(403);
+    expect(grantOwner.status).toBe(403);
+    expect(await errorCode(grantOwner)).toBe("FORBIDDEN");
 
+    // …nor may a manager demote or remove the owner.
+    const demoteOwner = await api("PATCH", `/organizations/${org.id}/members/${org.membership.id}`, bearer(bob), {
+      role: "VIEWER",
+    });
+    expect(demoteOwner.status).toBe(403);
     const remove = await api("DELETE", `/organizations/${org.id}/members/${org.membership.id}`, bearer(bob));
     expect(remove.status).toBe(403);
+    expect(await errorCode(remove)).toBe("FORBIDDEN");
 
-    // Carol is not a member at all → 404, never 403 (no enumeration).
+    // VIEWER lacks members.manage → every management call is 403 (role escalation rejected, PRD §116).
     for (const res of [
-      await api("GET", `/organizations/${org.id}/members`, bearer(carol)),
-      await api("POST", `/organizations/${org.id}/members`, bearer(carol), { email: CAROL, role: "VIEWER" }),
-      await api("PATCH", `/organizations/${org.id}/members/${bobMember.id}`, bearer(carol), { role: "VIEWER" }),
-      await api("DELETE", `/organizations/${org.id}/members/${bobMember.id}`, bearer(carol)),
+      await api("POST", `/organizations/${org.id}/members`, bearer(dave), { email: CAROL, role: "VIEWER" }),
+      await api("PATCH", `/organizations/${org.id}/members/${bobMember.id}`, bearer(dave), { role: "VIEWER" }),
+      await api("DELETE", `/organizations/${org.id}/members/${bobMember.id}`, bearer(dave)),
+      await api("PATCH", `/organizations/${org.id}`, bearer(dave), { name: "Nope" }),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(await errorCode(res)).toBe("FORBIDDEN");
+    }
+    // …while reads stay open to the viewer.
+    expect((await api("GET", `/organizations/${org.id}/members`, bearer(dave))).status).toBe(200);
+
+    // Carol is now a member (added by Bob) — use a fresh non-member for the 404 case.
+    const erin = await user("erin@example.com");
+    for (const res of [
+      await api("GET", `/organizations/${org.id}/members`, bearer(erin)),
+      await api("POST", `/organizations/${org.id}/members`, bearer(erin), { email: CAROL, role: "VIEWER" }),
+      await api("PATCH", `/organizations/${org.id}/members/${bobMember.id}`, bearer(erin), { role: "VIEWER" }),
+      await api("DELETE", `/organizations/${org.id}/members/${bobMember.id}`, bearer(erin)),
     ]) {
       expect(res.status).toBe(404);
       expect(await errorCode(res)).toBe("ORGANIZATION_NOT_FOUND");
     }
+    void carol;
 
-    // Nothing changed.
+    // Nothing about Bob or the owner changed.
     const row = await db
       .prepare("SELECT r.key, m.status FROM organization_members m JOIN roles r ON r.id = m.role_id WHERE m.id = ?")
       .bind(bobMember.id)
       .first<{ key: string; status: string }>();
     expect(row).toEqual({ key: "AFFILIATE_MANAGER", status: "ACTIVE" });
+    const owner = await db
+      .prepare("SELECT r.key, m.status FROM organization_members m JOIN roles r ON r.id = m.role_id WHERE m.id = ?")
+      .bind(org.membership.id)
+      .first<{ key: string; status: string }>();
+    expect(owner).toEqual({ key: "AFFILIATE_OWNER", status: "ACTIVE" });
+    void daveMember;
   });
 
   it("changes a member's role, audits it, and is a no-op for the same role", async () => {

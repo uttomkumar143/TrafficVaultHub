@@ -117,6 +117,39 @@ created_at)`. Rules:
 - `auth_events` (0002) stays separate: it is high-volume login telemetry keyed
   by user, whereas `audit_logs` records privileged mutations keyed by tenant.
 
+### 5. Permission-key RBAC (Unit 4; migration `0004_permissions.sql`)
+
+- `permissions` holds the PRD §10 catalogue plus the identity-module keys
+  `organizations.read/update`, `members.read/manage`; `role_permissions` maps
+  the 14 system roles to them. Both are reference data seeded by migration
+  with fixed ids (same reasoning as §1). A typed mirror lives in
+  `backend/src/modules/rbac/permissions.ts`; a test asserts parity with the
+  table so the two cannot drift.
+- **Middleware chain** (`backend/src/middleware/require-org.ts`):
+  `requireAuth` → `requireOrg` (`:orgId` path param → caller's ACTIVE
+  membership → role → permission keys, stored as `c.get("tenant")`) →
+  `requirePermission("<key>")`. Every tenant-scoped route from Unit 4 onward
+  MUST use this chain; services receive the resolved `TenantContext` and
+  never re-derive the tenant from client input.
+- Non-member / unknown / malformed org id → `404 ORGANIZATION_NOT_FOUND`
+  (unchanged no-enumeration rule). Missing key → `403 FORBIDDEN`.
+- **Grant policy:** `*.read` keys are broad within a tenant; mutating keys are
+  narrow. Network powers (`offers.approve`, `ledger.adjust`,
+  `payouts.review/approve/release`, `fraud.review`, `compliance.resolve`) are
+  PLATFORM-role only (PRD §11 separation of duties).
+- **Owner seats are protected beyond keys:** granting an owner role, or
+  changing/removing an existing owner, additionally requires the caller to
+  hold the owner role (`OrganizationService.assertOwner`). A role with
+  `members.manage` (e.g. `ADVERTISER_ADMIN`, `AFFILIATE_MANAGER`) manages
+  non-owner seats only. This closes the escalation path "manager mints
+  themselves an owner".
+- Authority is read from D1 on every request — no caching of permission sets
+  (KV caching may be introduced later with explicit invalidation on role
+  change; not before a measured need).
+- `GET /api/v1/organizations/:orgId/me` returns the caller's resolved role and
+  permission keys for UI gating. It is informational only; the server
+  re-checks every request.
+
 ## Consequences
 
 - **Positive:** authorization data (role catalogue, owner flag, type matrix)
@@ -127,7 +160,6 @@ created_at)`. Rules:
 - **Negative / accepted:** role catalogue changes require a migration (by
   design — PRD §109 wants schema-level immutability). The owner-only
   management rule is coarser than the §10 permission model until Unit 4 lands.
-- **Follow-ups:** Unit 4 seeds `permissions` + `role_permissions` (new
-  additive migration) and introduces the RBAC middleware; Unit 5 adds the
-  generic tenant-scoping helper and the explicit cross-tenant test suite;
-  Phase 9 documents the PLATFORM bootstrap runbook.
+- **Follow-ups:** Unit 5 adds the generic tenant-scoping helper for
+  `organization_id`-owned business resources and the explicit cross-tenant
+  test suite; Phase 9 documents the PLATFORM bootstrap runbook.
