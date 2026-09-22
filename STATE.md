@@ -16,7 +16,7 @@ Phase 0 unit status (verified by repository audit, 2026-09-22):
 | 3 | Frontend skeleton (React + Vite + TS, Tailwind, shadcn/ui, Router, TanStack Query, shell) | COMPLETE |
 | 4 | `migrations/0001_initial.sql` (six foundational tables) | COMPLETE — applied locally; immutable |
 | 5 | Testing setup (Vitest smoke tests, backend + frontend) | COMPLETE — backend: `backend/vitest.config.ts`, `src/routes/health.test.ts` (2 pass). Frontend: `frontend/vitest.config.ts`, `src/test/setup.ts`, `src/app/app.test.tsx` (2 pass, jsdom + Testing Library). Typecheck + build pass on both sides. |
-| 6 | CI skeleton (`.github/workflows/ci.yml`) | MISSING |
+| 6 | CI skeleton (`.github/workflows/ci.yml`) | BLOCKED (push) — workflow written, YAML validated, full sequence reproduced locally, committed as `89b8d87` on LOCAL branch `ci/github-actions-workflow`. GitHub rejects the push: GitHub App token lacks `workflows` permission. Not on `origin/main`. |
 | 7 | Docs (root `README.md`, `docs/architecture/overview.md`) | PARTIAL — root README is the prompt-kit usage guide, not a project README; `docs/architecture/` is empty |
 | 8 | STATE.md reflecting Phase 0 complete, next unit = Phase 1 | PARTIAL — this file exists and is maintained, but Phase 0 is not complete |
 
@@ -29,14 +29,20 @@ landmarks, HomePage heading, stubbed health result, and NotFound route.
 `npm run typecheck` and `npm run build` pass in both `backend/` and `frontend/`.
 
 ## Next Planned Unit
-Unit 6 — CI skeleton: `.github/workflows/ci.yml` running `npm ci`,
-`npm run typecheck`, `npm test`, `npm run build` for `frontend/` and `backend/`
-on push + pull_request (Node 22, no production secrets).
+Unit 7 — Docs: `docs/architecture/overview.md`; move prompt-kit guide from
+root `README.md` to `docs/runbooks/ai-build-kit.md`; write project `README.md`.
 
-Remaining after Unit 6: Unit 7 (docs), Unit 2 Durable Object placeholder,
-Unit 8 (final STATE.md).
+Remaining after Unit 7: Unit 2 Durable Object placeholder, Unit 8 (final
+STATE.md), and landing Unit 6 on `origin/main` once the permission is fixed.
 
 ## Open Questions / Blockers
+- **Unit 6 push blocked.** `git push` of any commit containing
+  `.github/workflows/ci.yml` is rejected by GitHub: "refusing to allow a
+  GitHub App to create or update workflow ... without `workflows` permission".
+  The Contents API returns 403 for the same path. Fix: grant the Genspark
+  GitHub App the *Workflows* permission on this repo (GitHub → Settings →
+  Applications), then push local branch `ci/github-actions-workflow` (or
+  cherry-pick `89b8d87`) onto `main`. Alternatively add the file manually.
 - `docs/PRD.md` ends mid-sentence at line 581 ("Advertiser experience shoul").
   This truncation is present in every historical version, so it is the original
   committed content. PRD is not edited.
@@ -58,4 +64,4 @@ Unit 8 (final STATE.md).
   `9b18951`, `539be11`).
 
 ## Last Updated
-2026-09-22 12:22 UTC — Unit 5 testing setup complete
+2026-09-22 12:26 UTC — Unit 6 written; push blocked by GitHub App workflows permission
