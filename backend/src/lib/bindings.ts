@@ -2,10 +2,14 @@
  * Worker environment bindings.
  * Mirrors `wrangler.jsonc`. Keep in sync when bindings change.
  */
+import type { AuthService, AuthenticatedContext } from "../modules/auth/service";
+
 export interface Bindings {
   // vars
   APP_ENV: string;
   API_VERSION: string;
+  /** Optional override of the 30-day default (ADR-001 §2). */
+  SESSION_TTL_SECONDS?: string;
 
   // Cloudflare resources (placeholders in Phase 0 — see wrangler.jsonc)
   DB: D1Database;
@@ -17,4 +21,11 @@ export interface Bindings {
   COORDINATOR: DurableObjectNamespace;
 }
 
-export type AppEnv = { Bindings: Bindings };
+/** Per-request variables set by middleware. */
+export interface Variables {
+  authService: AuthService;
+  /** Present only after `requireAuth` has run. */
+  auth: AuthenticatedContext;
+}
+
+export type AppEnv = { Bindings: Bindings; Variables: Variables };
