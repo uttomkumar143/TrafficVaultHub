@@ -1,0 +1,133 @@
+# ADR-002 — D1 data model: organizations, roles and membership
+
+- **Status:** Accepted (Phase 1, Unit 3)
+- **Date:** 2026-09-22
+- **PRD references:** §7 Multi-Tenant Model, §8 Organization Types, §9 User
+  Roles, §10 Permission Architecture, §92 Database Architecture, §93 Database
+  Rules, §94 Data Ownership, §95 Soft Deletion, §109 Migration Strategy,
+  §124 Admin Safety
+- **Migrations:** `0001_initial.sql` (tables), `0003_organizations.sql`
+  (owner flag, role/org-type matrix, role catalogue, audit log)
+
+## Context
+
+Every tenant-scoped resource in TrafficVaultHub is owned by an
+`organization_id` and every authorization decision joins *authenticated user →
+organization membership → role → permissions* (PRD §7, §10, §94). Migration
+0001 created `organizations`, `users`, `roles`, `permissions`,
+`role_permissions` and `organization_members`, but left three questions open
+that Unit 3 (Organizations CRUD + membership) must answer before any code
+touches them:
+
+1. How does the server know which role to give the *creator* of a new
+   organization, and how do we prevent an organization from losing its last
+   owner (PRD §124 "dangerous actions")?
+2. PRD §9 groups roles by tenant kind (Platform / Advertiser / Affiliate).
+   Which roles may be assigned inside `PARTNER` and `AGENCY` organizations,
+   which §9 does not list?
+3. Where do organization and membership changes get audited (PRD §92
+   `audit_logs`, §16 "every state transition is audited")?
+
+## Decision
+
+### 1. System role catalogue lives in the database, seeded by migration
+
+The fourteen PRD §9 role keys are inserted by `0003_organizations.sql` as
+**system roles** (`organization_id IS NULL`, `is_system = 1`) with fixed
+UUID-format ids (`…-0000000001xx` platform, `…-02xx` advertiser, `…-03xx`
+affiliate, `…-0401` shared `VIEWER`). Rationale:
+
+- `organization_members.role_id` is a foreign key; the target rows must exist
+  in every environment before the first organization is created.
+- Fixed ids make the rows identical across local, preview and production, so
+  no environment-specific lookup table is needed and `INSERT OR IGNORE` keeps
+  the migration idempotent.
+- This is PRD-defined **reference data**, not business or demo data — it is
+  the one exception to the "no seed data in migrations" rule and is documented
+  as such in `migrations/README.md`.
+- `VIEWER` appears once (system role keys are globally unique per the
+  `ux_roles_system_key` index); its tenant applicability is expressed through
+  `role_org_types`, not by duplicating the row.
+
+Tenant-defined custom roles (`organization_id NOT NULL`) remain possible under
+the 0001 schema but are **not** exposed by any API in Phase 1.
+
+### 2. `roles.is_owner` + `role_org_types` drive creator seating and guards
+
+- `roles.is_owner = 1` marks exactly one role per organization type:
+  `SUPER_ADMIN` (PLATFORM), `ADVERTISER_OWNER` (ADVERTISER, AGENCY),
+  `AFFILIATE_OWNER` (AFFILIATE, PARTNER). Uniqueness per type is asserted by
+  a test over the migration (`src/test/d1-sqlite.test.ts`).
+- `role_org_types (role_id, org_type)` is the allow-list of organization types
+  a role may be granted in. The service rejects any role assignment whose
+  `(role, organization.type)` pair is absent (`ROLE_NOT_ALLOWED_FOR_ORG_TYPE`).
+- On `POST /organizations` the server looks up the owner role for the given
+  `type` and seats the creator with it. The client never supplies a role for
+  itself.
+- **Last-owner guard:** a member holding the owner role cannot be removed, and
+  their role cannot be changed, if they are the only `ACTIVE` owner of that
+  organization (`LAST_OWNER`). This prevents orphaned tenants.
+- **PARTNER / AGENCY mapping (open question resolved provisionally):** PRD §8
+  lists these types but §9 defines no roles for them. We map AGENCY → the
+  advertiser role family (agencies operate advertiser accounts) and PARTNER →
+  the affiliate role family (partners supply traffic); `VIEWER` is available
+  to all four tenant types. If the product later defines dedicated
+  PARTNER/AGENCY roles, they are added by a new migration inserting roles +
+  `role_org_types` rows — no schema change, no code change in the guards.
+- **PLATFORM organizations cannot be self-created.** `POST /organizations`
+  accepts `ADVERTISER | AFFILIATE | PARTNER | AGENCY` only; creating the
+  platform tenant and seating the first `SUPER_ADMIN` is an operator
+  bootstrap procedure (Phase 9 deployment) and would otherwise be a trivial
+  privilege-escalation path (PRD §116).
+
+### 3. Membership semantics
+
+- One row per `(organization_id, user_id)` (unique index from 0001). Removing
+  a member sets `status = 'REMOVED'`, `removed_at = now` — soft deletion (PRD
+  §95). Re-adding a removed user **reactivates the same row** with the new
+  role rather than inserting a second one.
+- Members are added by *email* of an already-registered user. The server
+  resolves the email to `users.id`; the client never sends a `user_id`.
+  Invitation of not-yet-registered users (`status = 'INVITED'`, a token flow)
+  is deferred; the status value already exists in the 0001 check constraint.
+- Only `ACTIVE` memberships confer access. `SUSPENDED` is reserved for
+  compliance actions in Phase 4.
+- Any request for an organization the caller is not an `ACTIVE` member of —
+  including a non-existent id — answers `404 ORGANIZATION_NOT_FOUND`, never
+  403, so tenant ids cannot be enumerated (PRD §99 IDOR).
+- Managing members (add / change role / remove) and updating the organization
+  requires the caller to hold an **owner role** in that organization in Unit
+  3. Unit 4 replaces this coarse check with permission-key RBAC
+  (`organizations.update`, `members.manage`, …) on top of the same tables;
+  the owner-role check is the strict subset that is safe today.
+
+### 4. `audit_logs` is the single append-only audit table
+
+`0003` creates `audit_logs (id, organization_id, actor_user_id, action,
+target_type, target_id, metadata, ip_address, user_agent, request_id,
+created_at)`. Rules:
+
+- Rows are **never** updated or deleted by application code (PRD §57 spirit,
+  §92, §124).
+- `metadata` is JSON containing non-sensitive before/after values only —
+  never passwords, tokens, hashes or secrets (PRD §102).
+- Actions written by Unit 3: `organization.created`, `organization.updated`,
+  `member.added`, `member.role_changed`, `member.removed`. Later modules
+  (offers, finance, compliance) reuse the table with their own action keys.
+- `auth_events` (0002) stays separate: it is high-volume login telemetry keyed
+  by user, whereas `audit_logs` records privileged mutations keyed by tenant.
+
+## Consequences
+
+- **Positive:** authorization data (role catalogue, owner flag, type matrix)
+  is queryable and versioned with the schema; no role names are hardcoded in
+  guards beyond `is_owner`; tenant enumeration and last-owner orphaning are
+  prevented at the service layer with tests; audit trail exists from the first
+  tenant mutation.
+- **Negative / accepted:** role catalogue changes require a migration (by
+  design — PRD §109 wants schema-level immutability). The owner-only
+  management rule is coarser than the §10 permission model until Unit 4 lands.
+- **Follow-ups:** Unit 4 seeds `permissions` + `role_permissions` (new
+  additive migration) and introduces the RBAC middleware; Unit 5 adds the
+  generic tenant-scoping helper and the explicit cross-tenant test suite;
+  Phase 9 documents the PLATFORM bootstrap runbook.

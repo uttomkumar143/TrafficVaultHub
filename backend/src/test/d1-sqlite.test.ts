@@ -11,16 +11,62 @@ describe("test D1 shim", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
       .all<{ name: string }>();
     expect(rows.results.map((r) => r.name)).toEqual([
+      "audit_logs",
       "auth_events",
       "auth_tokens",
       "organization_members",
       "organizations",
       "permissions",
+      "role_org_types",
       "role_permissions",
       "roles",
       "sessions",
       "user_credentials",
       "users",
+    ]);
+  });
+
+  it("applies 0003: role catalogue (PRD §9), is_owner flag and role_org_types", async () => {
+    db = createTestD1();
+    const roles = await db
+      .prepare("SELECT key, is_owner FROM roles WHERE organization_id IS NULL AND is_system = 1 ORDER BY key")
+      .all<{ key: string; is_owner: number }>();
+    expect(roles.results.map((r) => r.key)).toEqual([
+      "ADVERTISER_ADMIN",
+      "ADVERTISER_OWNER",
+      "AFFILIATE_MANAGER",
+      "AFFILIATE_OWNER",
+      "AFFILIATE_USER",
+      "ANALYST",
+      "BILLING_MANAGER",
+      "CAMPAIGN_MANAGER",
+      "COMPLIANCE_MANAGER",
+      "FINANCE_MANAGER",
+      "OPERATIONS_ADMIN",
+      "SUPER_ADMIN",
+      "SUPPORT_AGENT",
+      "VIEWER",
+    ]);
+    expect(roles.results.filter((r) => r.is_owner === 1).map((r) => r.key)).toEqual([
+      "ADVERTISER_OWNER",
+      "AFFILIATE_OWNER",
+      "SUPER_ADMIN",
+    ]);
+
+    // Exactly one owner role per organization type.
+    const owners = await db
+      .prepare(
+        `SELECT t.org_type, COUNT(*) AS n
+           FROM role_org_types t JOIN roles r ON r.id = t.role_id
+          WHERE r.is_owner = 1 GROUP BY t.org_type ORDER BY t.org_type`,
+      )
+      .all<{ org_type: string; n: number }>();
+    expect(owners.results).toEqual([
+      { org_type: "ADVERTISER", n: 1 },
+      { org_type: "AFFILIATE", n: 1 },
+      { org_type: "AGENCY", n: 1 },
+      { org_type: "PARTNER", n: 1 },
+      { org_type: "PLATFORM", n: 1 },
     ]);
   });
 
