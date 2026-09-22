@@ -8,13 +8,12 @@ Phase 1 — Identity, Auth & Multi-Tenancy (`04-PHASE1-IDENTITY-TENANCY.md`)
 Phase 0 is COMPLETE (verified; see git history `2d4c17f`..`c25f376`). Do not
 redo Phase 0.
 
-Phase 1 unit status (verified 2026-09-22 against working tree at the Unit 2
-commit — see "Last Completed Unit"):
+Phase 1 unit status (verified 2026-09-22 against `main` @ `9c0f700`):
 
 | Unit | Scope | Status | Commits |
 |------|-------|--------|---------|
 | 1 | Auth foundation — email/password (scrypt via `@noble/hashes`, no hand-rolled crypto), email verification, opaque D1 sessions, password reset, MFA stub (never fake-passes). Routes under `/api/v1/auth`: `signup`, `verify-email`, `resend-verification`, `login`, `logout`, `forgot-password`, `reset-password`, `me`, `mfa`. `requireAuth` middleware. ADR-001. | COMPLETE | `39c201b`, `d763870`, `c11abfd`, `298124b`, `178b931` |
-| 2 | Session & device management — `GET /api/v1/auth/sessions` (active sessions, `current` flag, safe device fields), `DELETE /api/v1/auth/sessions/:id` (own only; foreign/unknown → 404 `SESSION_NOT_FOUND`), `POST /api/v1/auth/sessions/revoke-others` (idempotent, current kept). No migration needed — reuses `sessions` from 0002. ADR-001 §2 amended. | COMPLETE | see git log: `feat(auth): add session and device management` |
+| 2 | Session & device management — `GET /api/v1/auth/sessions` (active sessions, `current` flag, safe device fields), `DELETE /api/v1/auth/sessions/:id` (own only; foreign/unknown → 404 `SESSION_NOT_FOUND`), `POST /api/v1/auth/sessions/revoke-others` (idempotent, current kept). No migration needed — reuses `sessions` from 0002. ADR-001 §2 amended. | COMPLETE | `9c0f700` |
 | 3 | Organizations CRUD + membership with role | NOT STARTED (tables exist from 0001) | — |
 | 4 | RBAC middleware (user → membership → role → permissions) | NOT STARTED | — |
 | 5 | Tenant isolation enforcement + cross-tenant rejection test | NOT STARTED | — |
@@ -68,8 +67,7 @@ commit — see "Last Completed Unit"):
 
 ## Last Completed Unit
 Phase 1, Unit 2 — Session & device management (implemented, tested,
-smoke-tested and recorded in this session; commit
-`feat(auth): add session and device management` on `main`).
+smoke-tested and recorded in this session; commit `9c0f700` on `main`).
 
 ## Next Planned Unit
 Phase 1, Unit 3 — Organizations CRUD + membership with role:
