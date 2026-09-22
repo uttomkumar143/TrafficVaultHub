@@ -3,70 +3,99 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
-Phase 0 — Bootstrap
+Phase 1 — Identity, Auth & Multi-Tenancy (`04-PHASE1-IDENTITY-TENANCY.md`)
 
-Status: COMPLETE (with one human-action blocker: CI file activation, see
-below). All eight units are implemented, verified and pushed to
-`origin/main`. Next work is Phase 1.
+Phase 0 is COMPLETE (verified; see git history `2d4c17f`..`c25f376`). Do not
+redo Phase 0.
 
-Phase 0 unit status (verified 2026-09-22 against `origin/main` @ `1758dd8`
-from a fresh clone):
+Phase 1 unit status (verified 2026-09-22 against `origin/main` @ `178b931`):
 
-| Unit | Scope | Status | Commit |
-|------|-------|--------|--------|
-| 1 | Repo scaffolding, `docs/PRD.md`, `.gitignore` | COMPLETE | `2d4c17f` |
-| 2 | Backend skeleton — Workers + Hono, `GET /api/v1/health` → `{status:"ok"}`, `wrangler.jsonc` placeholders for D1/KV/R2/Queues + Durable Object `COORDINATOR` → `CoordinatorObject` (placeholder class, no logic) | COMPLETE | `ce313d9`, `97ece02` |
-| 3 | Frontend skeleton — React 19 + Vite 7 + TS, Tailwind 4, shadcn/ui, React Router 7, TanStack Query 5, AppShell | COMPLETE | `9a8b993` |
-| 4 | `migrations/0001_initial.sql` — 6 tables (organizations, users, organization_members, roles, permissions, role_permissions), UTC timestamps, no money fields | COMPLETE — immutable | `722f9bb` |
-| 5 | Vitest smoke tests — backend `health.test.ts` (2 pass), frontend `app.test.tsx` (2 pass, jsdom + Testing Library) | COMPLETE | `d4d52c9`, `ce96416` |
-| 6 | CI — `ci.yml` (backend + frontend: `npm ci` → typecheck → test → build; plus secret-scan job) | COMPLETE, NOT ACTIVE — valid YAML, sequence reproduced locally; committed at `.github/workflows-pending/ci.yml` because GitHub rejects App-token pushes to `.github/workflows/` | `aa8f2ee` |
-| 7 | Docs — root `README.md` (project, stack, local run), `docs/architecture/overview.md`; prompt-kit guide preserved at `docs/runbooks/ai-build-kit.md` | COMPLETE | `b954b35`, `1758dd8` |
-| 8 | STATE.md reflecting Phase 0 complete, next = Phase 1 | COMPLETE | this commit |
+| Unit | Scope | Status | Commits |
+|------|-------|--------|---------|
+| 1 | Auth foundation — email/password (scrypt via `@noble/hashes`, no hand-rolled crypto), email verification, opaque D1 sessions, password reset, MFA stub (never fake-passes). Routes under `/api/v1/auth`: `signup`, `verify-email`, `resend-verification`, `login`, `logout`, `forgot-password`, `reset-password`, `me`, `mfa`. `requireAuth` middleware. ADR-001. | COMPLETE | `39c201b`, `d763870`, `c11abfd`, `298124b`, `178b931` |
+| 2 | Session & device management — list active sessions, revoke one / all others | NOT STARTED (schema already supports it: `sessions.revoked_at/revoked_reason/ip_address/user_agent`) | — |
+| 3 | Organizations CRUD + membership with role | NOT STARTED (tables exist from 0001) | — |
+| 4 | RBAC middleware (user → membership → role → permissions) | NOT STARTED | — |
+| 5 | Tenant isolation enforcement + cross-tenant rejection test | NOT STARTED | — |
+| 6 | `migrations/0002_identity.sql` | DONE for Unit 1 scope (credentials, sessions, auth_tokens, auth_events, `users.mfa_enabled`). Further Phase 1 needs → new additive `0003_*.sql`; never edit `0001`/`0002` once pushed. | `39c201b` |
+| 7 | Frontend auth pages + auth context + route guards | NOT STARTED | — |
+| 8 | Security tests (unauthorized, expired session, cross-tenant, role escalation) | PARTIAL — unauthorized + revoked/expired + inactive-user covered in `backend/src/routes/auth.test.ts`; cross-tenant and role-escalation tests belong to Units 4–5 | — |
+| 9 | STATE.md → Phase 1 complete | pending | — |
 
-Definition-of-done verification (fresh clone of `origin/main`):
-- `backend`: `npm ci` ✅ · `typecheck` ✅ · `test` 2/2 ✅ · `build` (wrangler dry-run, lists `COORDINATOR` DO) ✅
-- `frontend`: `typecheck` ✅ · `test` 2/2 ✅ · `build` ✅ (source byte-identical to sandbox tree)
-- `wrangler dev` → `GET /api/v1/health` → HTTP 200 `{"status":"ok"}` ✅
-- `wrangler d1 migrations apply --local` on a clean DB → `0001_initial.sql` ✅, exactly 6 tables ✅
-- CI YAML parses; jobs: `backend`, `frontend`, `secret-scan` ✅
-- Secret scan CLEAN ✅ · working tree clean · `HEAD == origin/main` ✅
+### Unit 1 verification (this session, sandbox, Node 22, fresh `npm ci`)
+- `backend`: `npm run typecheck` ✅ · `npm test` 31/31 ✅ (4 files:
+  `routes/auth.test.ts`, `routes/health.test.ts`, `modules/auth/password.test.ts`,
+  `test/d1-sqlite.test.ts`) · `npm run build` (wrangler dry-run) ✅
+- `wrangler d1 migrations apply --local` on a clean DB → `0001` ✅ `0002` ✅
+  (10 tables: organizations, users, organization_members, roles, permissions,
+  role_permissions, user_credentials, sessions, auth_tokens, auth_events)
+- Live `wrangler dev` smoke test ✅: signup 201 → login before verify 403
+  `EMAIL_NOT_VERIFIED` → verify-email 200 → login 200 (bearer `tvh_s_…`) →
+  `/me` 200 · `/me` without token 401 → `/mfa` reports
+  `{enabled:false, available:false, reason:"NOT_IMPLEMENTED"}` → logout 204 →
+  `/me` with old token 401 → forgot-password 202 → reset-password 204 →
+  login with new password 200.
+- `scripts/secret-scan.sh` → CLEAN ✅
+
+### Key implementation facts (for the next session)
+- Backend layout: `backend/src/modules/auth/{constants,crypto-utils,email,mfa,password,repository,service,tokens}.ts`,
+  `backend/src/middleware/require-auth.ts`, `backend/src/routes/auth.ts`,
+  `backend/src/lib/{errors,validation,time,bindings}.ts`.
+- `createApp()` in `backend/src/app.ts` wires `AuthService` per request on
+  `/api/v1/auth/*`; tests inject `MemoryEmailSender`. `requireAuth` needs
+  `authService` on context — when adding protected routes outside `/auth/*`,
+  extend that wiring middleware's path (Unit 4 should generalize it).
+- Tests use `node:sqlite` shim (`backend/src/test/d1-sqlite.ts`) executing the
+  real migration SQL.
+- Debug tokens are echoed in responses only when `APP_ENV=development`.
+- Error envelope per PRD §72: `{ error: { code, message, request_id } }`.
+- No secrets required yet; `.dev.vars.example` documents vars.
 
 ## Last Completed Unit
-Phase 0, Unit 8 — final STATE.md. Phase 0 closed.
+Phase 1, Unit 1 — Auth foundation (implemented in prior session at
+`178b931`; verified, smoke-tested and recorded in this session).
 
 ## Next Planned Unit
-Phase 1, Unit 1 — Auth foundation (`04-PHASE1-IDENTITY-TENANCY.md`):
-email/password auth via a proven library (no hand-rolled crypto), email
-verification, password hashing, secure session issuance, password reset,
-clearly-stubbed MFA hook. PRD §7–§10, §12. Requires deciding session store
-(D1 vs KV) — record in `docs/adr/`. Migration goes in `0002_identity.sql`
-(additive; never edit `0001`).
+Phase 1, Unit 2 — Session & device management:
+- `GET /api/v1/auth/sessions` (list active sessions for the user: id,
+  created_at, last_seen_at, expires_at, ip_address, user_agent, `current`
+  flag), `DELETE /api/v1/auth/sessions/:id` (revoke one, own only),
+  `POST /api/v1/auth/sessions/revoke-others`.
+- Repository methods on the existing `sessions` table — no migration needed
+  unless a device label is added (then `0003_*.sql`, additive).
+- Tests: list excludes revoked/expired; revoking another user's session id →
+  404 (no cross-user leak); revoked session → 401.
+- Amend ADR-001 §2 if idle timeout is introduced.
+Then Unit 3 (organizations) → Unit 4 (RBAC middleware) → Unit 5 (tenant
+isolation + cross-tenant test) → Unit 7 (frontend) → Unit 8 → Unit 9.
 
 ## Open Questions / Blockers
-- **CI activation needs a human (only Phase 0 leftover).** The GitHub App
-  token cannot write `.github/workflows/` ("refusing to allow a GitHub App to
-  create or update workflow ... without `workflows` permission"; Contents API
-  → 403). The validated workflow is in the repo at
-  `.github/workflows-pending/ci.yml`. Fix — one of:
-  (a) `git mv .github/workflows-pending/ci.yml .github/workflows/ci.yml && git rm .github/workflows-pending/README.md`, commit, push;
-  (b) grant the Genspark GitHub App *Workflows: read & write* on this repo so a
-  session can do (a);
+- **CI activation still needs a human.** Re-attempted 2026-09-22 16:15 UTC on a
+  throwaway branch: GitHub rejected the push —
+  `refusing to allow a GitHub App to create or update workflow
+  .github/workflows/ci.yml without workflows permission`. Not retried (per
+  instructions). Validated workflow remains at
+  `.github/workflows-pending/ci.yml` (YAML parses; jobs `backend`, `frontend`,
+  `secret-scan`). Fix — one of:
+  (a) human runs `git mv .github/workflows-pending/ci.yml .github/workflows/ci.yml && git rm .github/workflows-pending/README.md`, commit, push;
+  (b) grant the Genspark GitHub App *Workflows: read & write* on this repo;
   (c) create the file via the GitHub web UI.
-- `docs/PRD.md` ends mid-sentence at line 581 ("Advertiser experience shoul").
-  Present in every historical version; PRD is not edited.
-- Cloudflare: NOT CONFIGURED. Deployment target (Genspark-hosted vs. own
-  account) undecided. All `wrangler.jsonc` resource IDs are placeholders.
-- Package manager strategy: separate `frontend/` and `backend/` npm projects
-  (no monorepo tooling).
+- Rate limiting / login lockout (PRD §110) deferred to Phase 8; columns
+  `user_credentials.failed_attempts/locked_until` already exist and are updated.
+- Real email provider deferred to Phase 6; `EmailSender` port in place.
+- `docs/PRD.md` ends mid-sentence at line 581 (historical; PRD is not edited).
+- Cloudflare: resource IDs in `backend/wrangler.jsonc` are placeholders;
+  deployment target (Genspark-hosted vs. own account) undecided. Note: hosted
+  deploy does not support `kv_namespaces` — revisit before first deploy.
+- Package manager strategy: separate `frontend/` and `backend/` npm projects.
 
 ## Notes for the Next Session
-- Read `docs/PRD.md` §7–§10, §12 before Phase 1 Unit 1.
-- Loop after every unit: WORK → VALIDATE → SECRET SCAN (`scripts/secret-scan.sh`)
-  → UPDATE STATE.md → COMMIT → PUSH → VERIFY → NEXT UNIT.
+- Loop after every unit: WORK → VALIDATE (typecheck, test, build) → SECRET SCAN
+  (`scripts/secret-scan.sh`) → UPDATE STATE.md → COMMIT → PUSH → VERIFY → NEXT.
 - `docs/BUILD_PROGRESS.md` is a STALE historical snapshot; this file is the only
   current-state source.
 - Prompt-kit files `01-…13-*.md` and `STATE-TEMPLATE.md` live in the repo root.
-- Local dev: `cd backend && npm run dev` (port 8787); `cd frontend && npm run dev`.
+- Local dev: `cd backend && npm ci && npx wrangler d1 migrations apply trafficvaulthub-db --local && npm run dev` (port 8787); `cd frontend && npm ci && npm run dev`.
 
 ## Last Updated
-2026-09-22 13:10 UTC — Phase 0 complete; Unit 8 final STATE.md
+2026-09-22 16:20 UTC — Phase 1 Unit 1 verified & recorded; CI activation re-blocked; next = Phase 1 Unit 2
