@@ -1,0 +1,33 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+.dev.vars
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.wrangler/
+
+# Logs / runtime
+*.log
+logs/
+.pm2/
+pids/
+*.pid
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Backups
+*.tar.gz
+*.zip
+*.bak
