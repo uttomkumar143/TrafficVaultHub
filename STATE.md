@@ -15,24 +15,26 @@ Phase 0 unit status (verified by repository audit, 2026-09-22):
 | 2 | Backend skeleton (Workers + Hono, `/api/v1/health`, wrangler bindings) | PARTIAL — Durable Object binding is only a commented example in `backend/wrangler.jsonc`; no `CoordinatorObject` class exported. D1/KV/R2/Queues placeholders are present. |
 | 3 | Frontend skeleton (React + Vite + TS, Tailwind, shadcn/ui, Router, TanStack Query, shell) | COMPLETE |
 | 4 | `migrations/0001_initial.sql` (six foundational tables) | COMPLETE — applied locally; immutable |
-| 5 | Testing setup (Vitest smoke tests, backend + frontend) | PARTIAL — backend done (`backend/vitest.config.ts`, `src/routes/health.test.ts`, 2 tests pass; typecheck + dry-run build pass). Frontend pending. |
+| 5 | Testing setup (Vitest smoke tests, backend + frontend) | COMPLETE — backend: `backend/vitest.config.ts`, `src/routes/health.test.ts` (2 pass). Frontend: `frontend/vitest.config.ts`, `src/test/setup.ts`, `src/app/app.test.tsx` (2 pass, jsdom + Testing Library). Typecheck + build pass on both sides. |
 | 6 | CI skeleton (`.github/workflows/ci.yml`) | MISSING |
 | 7 | Docs (root `README.md`, `docs/architecture/overview.md`) | PARTIAL — root README is the prompt-kit usage guide, not a project README; `docs/architecture/` is empty |
 | 8 | STATE.md reflecting Phase 0 complete, next unit = Phase 1 | PARTIAL — this file exists and is maintained, but Phase 0 is not complete |
 
 ## Last Completed Unit
-Unit 5 (backend half) — Vitest added to `backend/` (`npm test` = `vitest run`);
-`GET /api/v1/health` smoke test via `createApp().request()` passes (200,
-`{"status":"ok"}`), plus 404 envelope check. `npm run typecheck` and
-`npm run build` (wrangler dry-run) pass.
+Unit 5 — Testing Setup. Backend: `npm test` (Vitest) runs
+`GET /api/v1/health` via `createApp().request()` → 200 `{"status":"ok"}`.
+Frontend: `npm test` (Vitest + jsdom + Testing Library) renders the real route
+table under `createMemoryRouter` + `QueryClientProvider`, asserts AppShell
+landmarks, HomePage heading, stubbed health result, and NotFound route.
+`npm run typecheck` and `npm run build` pass in both `backend/` and `frontend/`.
 
 ## Next Planned Unit
-Unit 5 (frontend half) — Vitest + jsdom + Testing Library in `frontend/`;
-render smoke test for AppShell/HomePage under MemoryRouter +
-QueryClientProvider; add `test` script; run test/typecheck/build.
+Unit 6 — CI skeleton: `.github/workflows/ci.yml` running `npm ci`,
+`npm run typecheck`, `npm test`, `npm run build` for `frontend/` and `backend/`
+on push + pull_request (Node 22, no production secrets).
 
-Remaining after Unit 5: Unit 6 (CI), Unit 7 (docs), Unit 2 Durable Object
-placeholder, Unit 8 (final STATE.md).
+Remaining after Unit 6: Unit 7 (docs), Unit 2 Durable Object placeholder,
+Unit 8 (final STATE.md).
 
 ## Open Questions / Blockers
 - `docs/PRD.md` ends mid-sentence at line 581 ("Advertiser experience shoul").
@@ -56,4 +58,4 @@ placeholder, Unit 8 (final STATE.md).
   `9b18951`, `539be11`).
 
 ## Last Updated
-2026-09-22 12:19 UTC — Unit 5 backend testing complete
+2026-09-22 12:22 UTC — Unit 5 testing setup complete
