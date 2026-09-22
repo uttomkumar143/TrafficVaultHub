@@ -8,29 +8,29 @@ Phase 1 — Identity, Auth & Multi-Tenancy (`04-PHASE1-IDENTITY-TENANCY.md`)
 Phase 0 is COMPLETE (verified; see git history `2d4c17f`..`c25f376`). Do not
 redo Phase 0.
 
-Phase 1 unit status (verified 2026-09-22 against `main` @ `5930b81`):
+Phase 1 unit status (verified 2026-09-22 against `main` @ `39433eb`):
 
 | Unit | Scope | Status | Commits |
 |------|-------|--------|---------|
 | 1 | Auth foundation — email/password (scrypt via `@noble/hashes`, no hand-rolled crypto), email verification, opaque D1 sessions, password reset, MFA stub (never fake-passes). Routes under `/api/v1/auth`: `signup`, `verify-email`, `resend-verification`, `login`, `logout`, `forgot-password`, `reset-password`, `me`, `mfa`. `requireAuth` middleware. ADR-001. | COMPLETE | `39c201b`, `d763870`, `c11abfd`, `298124b`, `178b931` |
 | 2 | Session & device management — `GET /api/v1/auth/sessions` (active sessions, `current` flag, safe device fields), `DELETE /api/v1/auth/sessions/:id` (own only; foreign/unknown → 404 `SESSION_NOT_FOUND`), `POST /api/v1/auth/sessions/revoke-others` (idempotent, current kept). No migration needed — reuses `sessions` from 0002. ADR-001 §2 amended. | COMPLETE | `9c0f700` |
 | 3 | Organizations CRUD + membership — `migrations/0003_organizations.sql` (`roles.is_owner`, `role_org_types`, PRD §9 role catalogue, append-only `audit_logs`); `modules/organizations/{repository,service}.ts`, `modules/audit/repository.ts`; routes `/api/v1/organizations` (create → creator seated as type owner; list mine; get; PATCH name; `/:orgId/roles`; members list/add-by-email/change-role/remove). Non-member → 404 no-enumeration; non-owner management → 403; `LAST_OWNER`, `SELF_MODIFICATION`, `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`, `ALREADY_MEMBER`, `SLUG_ALREADY_EXISTS`. ADR-002. 16 integration tests in `routes/organizations.test.ts`. | COMPLETE | `0d617a7`, `ab2c6ab`, `f1e7b96`, `5930b81` |
-| 4 | RBAC middleware (user → membership → role → permissions) | NOT STARTED | — |
+| 4 | RBAC middleware — `migrations/0004_permissions.sql` (PRD §10 catalogue + `organizations.*`/`members.*`, `role_permissions` for 14 roles); `middleware/require-org.ts` (`requireOrg`: `:orgId` → ACTIVE membership → role → permission keys as `c.get("tenant")`, non-member → 404; `requirePermission(key)` → 403); `modules/rbac/permissions.ts` typed keys (parity test vs DB); `OrganizationService.resolveTenant`; organizations routes now permission-keyed (`organizations.read/update`, `members.read/manage`) + owner-seat guard (`assertOwner`); `GET /:orgId/me`. ADR-002 §5. 10 tests in `routes/rbac.test.ts`. | COMPLETE | `745a062`, `39433eb` |
 | 5 | Tenant isolation enforcement + cross-tenant rejection test | NOT STARTED | — |
-| 6 | `migrations/0002_identity.sql` | DONE (credentials, sessions, auth_tokens, auth_events, `users.mfa_enabled`). `0003_organizations.sql` added for Unit 3. Unit 4 needs additive `0004_*.sql` (permissions + role_permissions catalogue). Never edit applied migrations. | `39c201b`, `0d617a7` |
+| 6 | Migrations | DONE — `0002_identity.sql`, `0003_organizations.sql`, `0004_permissions.sql` (all additive; never edit applied migrations). | `39c201b`, `0d617a7`, `745a062` |
 | 7 | Frontend auth pages + auth context + route guards | NOT STARTED | — |
-| 8 | Security tests (unauthorized, expired session, cross-tenant, role escalation) | PARTIAL — unauthorized + revoked/expired + inactive-user (`routes/auth.test.ts`), cross-USER session isolation (`routes/auth-sessions.test.ts`), cross-TENANT org/member access → 404 and non-owner management → 403 (`routes/organizations.test.ts`) covered; permission-key role-escalation tests belong to Units 4–5 | — |
+| 8 | Security tests (unauthorized, expired session, cross-tenant, role escalation) | PARTIAL — unauthorized + revoked/expired + inactive-user (`routes/auth.test.ts`), cross-USER session isolation (`routes/auth-sessions.test.ts`), cross-TENANT → 404 + body `organization_id` ignored + removed membership (`routes/rbac.test.ts`, `routes/organizations.test.ts`), ROLE ESCALATION → 403 for VIEWER/AFFILIATE_USER and manager-mints-owner (`routes/rbac.test.ts`). Remaining for Unit 5: generic helper for `organization_id`-owned business resources (none exist yet) + a dedicated cross-tenant suite file. | `39433eb` |
 | 9 | STATE.md → Phase 1 complete | pending | — |
 
-### Unit 3 verification (this session, sandbox, Node 22.23, fresh `npm ci`)
-- `backend`: `npm run typecheck` ✅ · `npm test` **60/60** ✅ (6 files; 44
-  pre-existing + 16 new in `src/routes/organizations.test.ts`) ·
-  `npm run build` (wrangler dry-run) ✅
-- `wrangler d1 migrations apply --local` on a clean DB → `0001` ✅ `0002` ✅
-  `0003` ✅; `SELECT COUNT(*) FROM roles` = 14 (PRD §9 catalogue)
-- `scripts/secret-scan.sh` → CLEAN ✅
-- Unit 2 verification (43/43 + live `wrangler dev` smoke) recorded in git
-  history at `55923e4`.
+### Unit 4 verification (this session, sandbox, Node 22.23, fresh `npm ci`)
+- `backend`: `npm run typecheck` ✅ · `npm test` **71/71** ✅ (7 files; 61
+  pre-existing incl. 0004 migration assertions + 10 new in
+  `src/routes/rbac.test.ts`) · `npm run build` (wrangler dry-run) ✅
+- `scripts/secret-scan.sh` → CLEAN ✅ (94 files)
+- Migrations 0001–0004 applied by the node:sqlite shim in every test run;
+  `d1-sqlite.test.ts` asserts the permission catalogue and grant policy.
+- Unit 3 verification (60/60) recorded at `150d51d`; Unit 2 (43/43 + live
+  `wrangler dev` smoke) at `55923e4`.
 
 ### Key implementation facts (for the next session)
 - Backend layout: `backend/src/modules/auth/{constants,crypto-utils,email,mfa,password,repository,service,tokens}.ts`,
@@ -43,9 +43,18 @@ Phase 1 unit status (verified 2026-09-22 against `main` @ `5930b81`):
   constructs `AuthService` + `OrganizationService` per request and is mounted
   on `/api/v1/auth/*` and `/api/v1/organizations(/*)`. Every new protected
   module prefix MUST be added there (unknown paths stay 404, never 503).
-- Org authority (Unit 3): `OrganizationService.requireMembership` (ACTIVE
-  member or 404) and `requireOwner` (`roles.is_owner = 1` or 403). Unit 4
-  replaces `requireOwner` with permission-key checks on the same tables.
+- **RBAC chain for every tenant-scoped route (Unit 4, mandatory from now on):**
+  `routes.use("*", requireAuth)` → `routes.use("/:orgId", requireOrg)` +
+  `routes.use("/:orgId/*", requireOrg)` → per route
+  `requirePermission("<key>")`. Handlers read `c.get("tenant")`
+  (`TenantContext { organization, membership, role, permissions:Set }`) and
+  pass it to services; services never re-resolve the tenant from client data.
+  Typed keys: `modules/rbac/permissions.ts` (`PermissionKey`). New permission
+  keys = new additive migration + extend `PERMISSION_KEYS` in the same commit
+  (parity test enforces it).
+- Owner-seat rule: `members.manage` covers non-owner seats; granting/changing/
+  removing an OWNER seat additionally requires `tenant.role.is_owner`
+  (`OrganizationService.assertOwner`).
 - Audit: `AuditRepository.statement(entry)` returns a D1 prepared statement so
   the audit row is batched atomically with the mutation. Actions so far:
   `organization.created|updated`, `member.added|role_changed|removed`.
@@ -63,31 +72,31 @@ Phase 1 unit status (verified 2026-09-22 against `main` @ `5930b81`):
 - No secrets required yet; `.dev.vars.example` documents vars.
 
 ## Last Completed Unit
-Phase 1, Unit 3 — Organizations CRUD + membership (implemented `f1e7b96`,
-tested `5930b81`, verified in this session; on `main`).
+Phase 1, Unit 4 — RBAC middleware + permission-keyed organizations routes
+(migration `745a062`, implementation + tests + ADR `39433eb`; on `main`).
 
 ## Next Planned Unit
-Phase 1, Unit 4 — RBAC middleware (user → membership → role → permissions):
-- Additive `migrations/0004_permissions.sql`: seed the PRD §10 `permissions`
-  catalogue (`offers.read/create/update/approve/pause`,
-  `conversions.read/approve/reject`, `ledger.read/adjust`,
-  `payouts.read/review/approve/release`, `fraud.read/review`,
-  `compliance.read/resolve`, `audit.read`) plus the identity-module keys
-  needed now (`organizations.read/update`, `members.read/manage`), and
-  `role_permissions` rows mapping the 14 system roles. Fixed ids like 0003.
-- `backend/src/middleware/require-org.ts` (name TBD): resolves `:orgId` →
-  caller's ACTIVE membership (404 if none) → role → permission set; exposes
-  `c.get("tenant")` = `{ organization, membership, role, permissions }` and
-  a `requirePermission("key")` guard (403 `FORBIDDEN`). Never reads
-  `organization_id` from body/query.
-- Refactor `routes/organizations.ts` to use the middleware instead of
-  `requireOwner` (keep behaviour: owner roles hold `organizations.update`
-  + `members.manage`; VIEWER etc. hold `*.read` only).
-- Tests: role escalation (VIEWER calling manage endpoints → 403; member
-  assigning a role their org type does not allow → 400), permission
-  resolution per role, cross-tenant still 404.
-- Then Unit 5 (generic tenant-scoping helper + explicit cross-tenant suite),
-  Unit 7 (frontend auth pages, org switcher), Unit 8, Unit 9.
+Phase 1, Unit 5 — Tenant isolation enforcement helper + explicit cross-tenant
+suite (PRD §94, §116; phase prompt unit 5):
+- Add `backend/src/lib/tenant-scope.ts` (name TBD): a small helper used by
+  repositories of `organization_id`-owned resources so every query is bound
+  to `tenant.organization.id` from `TenantContext` — e.g.
+  `scopedFirst/scopedAll(db, sql, tenantId, ...params)` that REQUIRES the
+  tenant id as a positional bind and refuses SQL without an
+  `organization_id = ?` predicate (guard against forgotten scoping). Keep it
+  minimal; it will be adopted by Phase 2 (`offers`, `advertiser_profiles`,
+  `affiliate_profiles`) — do not create business tables in Unit 5.
+- Add `backend/src/routes/tenant-isolation.test.ts`: a dedicated, clearly
+  named PRD §116 "cross-tenant request rejected" suite — member of A
+  addressing B on every route family (orgs, members, /me), member-id from B
+  under A's path (`MEMBER_NOT_FOUND`), body/query `organization_id`
+  smuggling, PLATFORM org cannot be self-created, and the helper's unit tests
+  (refuses unscoped SQL).
+- Update ADR-002 §6 (tenant-scoping helper), STATE.md, commit, push.
+- Then Unit 7 (frontend: login/signup/verify/reset pages, auth context on
+  TanStack Query, org switcher, role/permission route guards using
+  `GET /organizations/:orgId/me`), Unit 8 (remaining security tests), Unit 9
+  (STATE.md → Phase 1 complete, next Phase 2).
 
 ## Open Questions / Blockers
 - **CI activation still needs a human.** Last attempt 2026-09-22 16:15 UTC:
@@ -122,4 +131,4 @@ Phase 1, Unit 4 — RBAC middleware (user → membership → role → permission
 - Local dev: `cd backend && npm ci && npx wrangler d1 migrations apply trafficvaulthub-db --local && npm run dev` (port 8787); `cd frontend && npm ci && npm run dev`.
 
 ## Last Updated
-2026-09-22 18:20 UTC — Phase 1 Unit 3 (organizations CRUD + membership) complete & verified; next = Phase 1 Unit 4 (RBAC middleware)
+2026-09-22 18:50 UTC — Phase 1 Unit 4 (RBAC middleware, permission-keyed routes, 71/71 tests) complete & verified & pushed (`39433eb`); next = Phase 1 Unit 5 (tenant-scoping helper + cross-tenant suite)
