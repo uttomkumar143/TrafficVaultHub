@@ -8,84 +8,86 @@ Phase 1 — Identity, Auth & Multi-Tenancy (`04-PHASE1-IDENTITY-TENANCY.md`)
 Phase 0 is COMPLETE (verified; see git history `2d4c17f`..`c25f376`). Do not
 redo Phase 0.
 
-Phase 1 unit status (verified 2026-09-22 against `main` @ `9c0f700`):
+Phase 1 unit status (verified 2026-09-22 against `main` @ `5930b81`):
 
 | Unit | Scope | Status | Commits |
 |------|-------|--------|---------|
 | 1 | Auth foundation — email/password (scrypt via `@noble/hashes`, no hand-rolled crypto), email verification, opaque D1 sessions, password reset, MFA stub (never fake-passes). Routes under `/api/v1/auth`: `signup`, `verify-email`, `resend-verification`, `login`, `logout`, `forgot-password`, `reset-password`, `me`, `mfa`. `requireAuth` middleware. ADR-001. | COMPLETE | `39c201b`, `d763870`, `c11abfd`, `298124b`, `178b931` |
 | 2 | Session & device management — `GET /api/v1/auth/sessions` (active sessions, `current` flag, safe device fields), `DELETE /api/v1/auth/sessions/:id` (own only; foreign/unknown → 404 `SESSION_NOT_FOUND`), `POST /api/v1/auth/sessions/revoke-others` (idempotent, current kept). No migration needed — reuses `sessions` from 0002. ADR-001 §2 amended. | COMPLETE | `9c0f700` |
-| 3 | Organizations CRUD + membership with role | NOT STARTED (tables exist from 0001) | — |
+| 3 | Organizations CRUD + membership — `migrations/0003_organizations.sql` (`roles.is_owner`, `role_org_types`, PRD §9 role catalogue, append-only `audit_logs`); `modules/organizations/{repository,service}.ts`, `modules/audit/repository.ts`; routes `/api/v1/organizations` (create → creator seated as type owner; list mine; get; PATCH name; `/:orgId/roles`; members list/add-by-email/change-role/remove). Non-member → 404 no-enumeration; non-owner management → 403; `LAST_OWNER`, `SELF_MODIFICATION`, `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`, `ALREADY_MEMBER`, `SLUG_ALREADY_EXISTS`. ADR-002. 16 integration tests in `routes/organizations.test.ts`. | COMPLETE | `0d617a7`, `ab2c6ab`, `f1e7b96`, `5930b81` |
 | 4 | RBAC middleware (user → membership → role → permissions) | NOT STARTED | — |
 | 5 | Tenant isolation enforcement + cross-tenant rejection test | NOT STARTED | — |
-| 6 | `migrations/0002_identity.sql` | DONE for Unit 1+2 scope (credentials, sessions, auth_tokens, auth_events, `users.mfa_enabled`). Further Phase 1 needs → new additive `0003_*.sql`; never edit `0001`/`0002`. | `39c201b` |
+| 6 | `migrations/0002_identity.sql` | DONE (credentials, sessions, auth_tokens, auth_events, `users.mfa_enabled`). `0003_organizations.sql` added for Unit 3. Unit 4 needs additive `0004_*.sql` (permissions + role_permissions catalogue). Never edit applied migrations. | `39c201b`, `0d617a7` |
 | 7 | Frontend auth pages + auth context + route guards | NOT STARTED | — |
-| 8 | Security tests (unauthorized, expired session, cross-tenant, role escalation) | PARTIAL — unauthorized + revoked/expired + inactive-user (`routes/auth.test.ts`) and cross-USER session isolation (`routes/auth-sessions.test.ts`) covered; cross-TENANT and role-escalation tests belong to Units 4–5 | — |
+| 8 | Security tests (unauthorized, expired session, cross-tenant, role escalation) | PARTIAL — unauthorized + revoked/expired + inactive-user (`routes/auth.test.ts`), cross-USER session isolation (`routes/auth-sessions.test.ts`), cross-TENANT org/member access → 404 and non-owner management → 403 (`routes/organizations.test.ts`) covered; permission-key role-escalation tests belong to Units 4–5 | — |
 | 9 | STATE.md → Phase 1 complete | pending | — |
 
-### Unit 2 verification (this session, sandbox, Node 22.23, fresh `npm ci`)
-- `backend`: `npm run typecheck` ✅ · `npm test` **43/43** ✅ (5 files; 31
-  pre-existing + 12 new in `src/routes/auth-sessions.test.ts`) ·
+### Unit 3 verification (this session, sandbox, Node 22.23, fresh `npm ci`)
+- `backend`: `npm run typecheck` ✅ · `npm test` **60/60** ✅ (6 files; 44
+  pre-existing + 16 new in `src/routes/organizations.test.ts`) ·
   `npm run build` (wrangler dry-run) ✅
 - `wrangler d1 migrations apply --local` on a clean DB → `0001` ✅ `0002` ✅
-  (unchanged; no new migration)
-- Live `wrangler dev` smoke test ✅ (real D1 local): signup → verify → login A,
-  login B → `GET /sessions` from A lists both with A `current:true`, B
-  `current:false` → unauthenticated `GET /sessions` 401 → `DELETE /sessions/B`
-  204 → `/me` with B 401, with A 200 → login C → `revoke-others` from A
-  `{revoked_count:1}` → A 200, C 401 → repeat `revoke-others`
-  `{revoked_count:0}`. Cross-user: Alice `DELETE` Bob's session id → 404
-  `SESSION_NOT_FOUND`, Bob `/me` still 200, Bob's row `revoked_at IS NULL`;
-  Alice's list never includes Bob; Alice `revoke-others` leaves Bob 200.
-  List body contains no `token_hash` / `tvh_s_` / `password_hash`.
+  `0003` ✅; `SELECT COUNT(*) FROM roles` = 14 (PRD §9 catalogue)
 - `scripts/secret-scan.sh` → CLEAN ✅
+- Unit 2 verification (43/43 + live `wrangler dev` smoke) recorded in git
+  history at `55923e4`.
 
 ### Key implementation facts (for the next session)
 - Backend layout: `backend/src/modules/auth/{constants,crypto-utils,email,mfa,password,repository,service,tokens}.ts`,
-  `backend/src/middleware/require-auth.ts`, `backend/src/routes/auth.ts`,
+  `backend/src/modules/organizations/{repository,service}.ts`,
+  `backend/src/modules/audit/repository.ts`,
+  `backend/src/middleware/require-auth.ts`,
+  `backend/src/routes/{auth,organizations,health}.ts`,
   `backend/src/lib/{errors,validation,time,bindings}.ts`.
-- Unit 2 repository methods (all `user_id`-scoped, parameterized):
-  `listActiveSessions(userId)`, `revokeOwnedSession(userId, sessionId, reason)`
-  → boolean, `revokeOtherSessions(userId, currentSessionId, reason)` →
-  revoked ids (SELECT+UPDATE in one `db.batch`). Service:
-  `listSessions(ctx)`, `revokeSession(ctx, id, meta)`,
-  `revokeOtherSessions(ctx, meta)`. Current session id comes from
-  `c.get("auth").session.id` (set by `requireAuth`); no token is kept on the
-  context.
-- `createApp()` in `backend/src/app.ts` wires `AuthService` per request on
-  `/api/v1/auth/*`; tests inject `MemoryEmailSender`. `requireAuth` needs
-  `authService` on context — when adding protected routes outside `/auth/*`,
-  extend that wiring middleware's path (Unit 4 should generalize it).
+- `createApp()` (`backend/src/app.ts`) has a `wireServices` middleware that
+  constructs `AuthService` + `OrganizationService` per request and is mounted
+  on `/api/v1/auth/*` and `/api/v1/organizations(/*)`. Every new protected
+  module prefix MUST be added there (unknown paths stay 404, never 503).
+- Org authority (Unit 3): `OrganizationService.requireMembership` (ACTIVE
+  member or 404) and `requireOwner` (`roles.is_owner = 1` or 403). Unit 4
+  replaces `requireOwner` with permission-key checks on the same tables.
+- Audit: `AuditRepository.statement(entry)` returns a D1 prepared statement so
+  the audit row is batched atomically with the mutation. Actions so far:
+  `organization.created|updated`, `member.added|role_changed|removed`.
 - Tests use `node:sqlite` shim (`backend/src/test/d1-sqlite.ts`) executing the
-  real migration SQL.
+  real migration SQL; `d1-sqlite.test.ts` asserts the expected table list —
+  update it when adding tables in a migration.
 - Debug tokens are echoed in responses only when `APP_ENV=development`.
 - Error envelope per PRD §72: `{ error: { code, message, request_id } }`.
   Codes so far: `VALIDATION_ERROR`, `UNAUTHENTICATED`, `INVALID_CREDENTIALS`,
   `EMAIL_NOT_VERIFIED`, `ACCOUNT_INACTIVE`, `EMAIL_ALREADY_REGISTERED`,
   `INVALID_TOKEN`, `SESSION_NOT_FOUND`, `NOT_FOUND`, `SERVICE_UNAVAILABLE`,
-  `INTERNAL_ERROR`.
+  `INTERNAL_ERROR`, `ORGANIZATION_NOT_FOUND`, `MEMBER_NOT_FOUND`,
+  `USER_NOT_FOUND`, `SLUG_ALREADY_EXISTS`, `ALREADY_MEMBER`, `FORBIDDEN`,
+  `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`, `LAST_OWNER`, `SELF_MODIFICATION`.
 - No secrets required yet; `.dev.vars.example` documents vars.
 
 ## Last Completed Unit
-Phase 1, Unit 2 — Session & device management (implemented, tested,
-smoke-tested and recorded in this session; commit `9c0f700` on `main`).
+Phase 1, Unit 3 — Organizations CRUD + membership (implemented `f1e7b96`,
+tested `5930b81`, verified in this session; on `main`).
 
 ## Next Planned Unit
-Phase 1, Unit 3 — Organizations CRUD + membership with role:
-- `organizations` / `organization_members` / `roles` tables already exist
-  from `0001_initial.sql` — inspect them first; add `0003_*.sql` only if a
-  column is genuinely missing (additive; never edit 0001/0002).
-- Module `backend/src/modules/organizations/{repository,service}.ts`, routes
-  under `/api/v1/organizations` (create with `type` in
-  `PLATFORM|ADVERTISER|AFFILIATE|PARTNER|AGENCY`, get, list mine, update;
-  membership add/list/remove with role). Creator becomes owner-role member.
-- Every route behind `requireAuth`; membership checks server-side only —
-  never trust a client-supplied `organization_id` (PRD §7, §116). This is
-  the groundwork Unit 4 (RBAC middleware) and Unit 5 (tenant isolation +
-  cross-tenant test) build on.
-- Note: `app.ts` wires `authService` only for `/api/v1/auth/*`; extend the
-  wiring path (or generalize it) so `requireAuth` works on `/organizations`.
-Then Unit 4 (RBAC middleware) → Unit 5 (tenant isolation + cross-tenant
-test) → Unit 7 (frontend) → Unit 8 → Unit 9.
+Phase 1, Unit 4 — RBAC middleware (user → membership → role → permissions):
+- Additive `migrations/0004_permissions.sql`: seed the PRD §10 `permissions`
+  catalogue (`offers.read/create/update/approve/pause`,
+  `conversions.read/approve/reject`, `ledger.read/adjust`,
+  `payouts.read/review/approve/release`, `fraud.read/review`,
+  `compliance.read/resolve`, `audit.read`) plus the identity-module keys
+  needed now (`organizations.read/update`, `members.read/manage`), and
+  `role_permissions` rows mapping the 14 system roles. Fixed ids like 0003.
+- `backend/src/middleware/require-org.ts` (name TBD): resolves `:orgId` →
+  caller's ACTIVE membership (404 if none) → role → permission set; exposes
+  `c.get("tenant")` = `{ organization, membership, role, permissions }` and
+  a `requirePermission("key")` guard (403 `FORBIDDEN`). Never reads
+  `organization_id` from body/query.
+- Refactor `routes/organizations.ts` to use the middleware instead of
+  `requireOwner` (keep behaviour: owner roles hold `organizations.update`
+  + `members.manage`; VIEWER etc. hold `*.read` only).
+- Tests: role escalation (VIEWER calling manage endpoints → 403; member
+  assigning a role their org type does not allow → 400), permission
+  resolution per role, cross-tenant still 404.
+- Then Unit 5 (generic tenant-scoping helper + explicit cross-tenant suite),
+  Unit 7 (frontend auth pages, org switcher), Unit 8, Unit 9.
 
 ## Open Questions / Blockers
 - **CI activation still needs a human.** Last attempt 2026-09-22 16:15 UTC:
@@ -120,4 +122,4 @@ test) → Unit 7 (frontend) → Unit 8 → Unit 9.
 - Local dev: `cd backend && npm ci && npx wrangler d1 migrations apply trafficvaulthub-db --local && npm run dev` (port 8787); `cd frontend && npm ci && npm run dev`.
 
 ## Last Updated
-2026-09-22 17:20 UTC — Phase 1 Unit 2 (session & device management) complete & verified; next = Phase 1 Unit 3 (organizations)
+2026-09-22 18:20 UTC — Phase 1 Unit 3 (organizations CRUD + membership) complete & verified; next = Phase 1 Unit 4 (RBAC middleware)
