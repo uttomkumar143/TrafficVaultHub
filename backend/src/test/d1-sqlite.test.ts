@@ -11,6 +11,8 @@ describe("test D1 shim", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
       .all<{ name: string }>();
     expect(rows.results.map((r) => r.name)).toEqual([
+      "advertiser_profiles",
+      "advertiser_status_transitions",
       "audit_logs",
       "auth_events",
       "auth_tokens",
@@ -74,6 +76,9 @@ describe("test D1 shim", () => {
     db = createTestD1();
     const perms = await db.prepare("SELECT key FROM permissions ORDER BY key").all<{ key: string }>();
     expect(perms.results.map((p) => p.key)).toEqual([
+      "advertisers.manage",
+      "advertisers.read",
+      "advertisers.review",
       "audit.read",
       "compliance.read",
       "compliance.resolve",
@@ -117,10 +122,28 @@ describe("test D1 shim", () => {
     for (const owner of ["ADVERTISER_OWNER", "AFFILIATE_OWNER"]) {
       expect(byRole.get(owner)).toEqual(expect.arrayContaining(["organizations.update", "members.manage"]));
     }
-    expect(byRole.get("VIEWER")).toEqual(["conversions.read", "members.read", "offers.read", "organizations.read"]);
+    expect(byRole.get("VIEWER")).toEqual([
+      "advertisers.read",
+      "conversions.read",
+      "members.read",
+      "offers.read",
+      "organizations.read",
+    ]);
+
+    // 0005: tenant advertiser roles manage their own profile; only platform roles review.
+    expect(byRole.get("ADVERTISER_OWNER")).toEqual(expect.arrayContaining(["advertisers.read", "advertisers.manage"]));
+    expect(byRole.get("AFFILIATE_OWNER")).not.toEqual(expect.arrayContaining(["advertisers.manage"]));
 
     // Network-only powers never reach tenant roles (PRD §11 separation of duties).
-    const networkOnly = ["offers.approve", "ledger.adjust", "payouts.approve", "payouts.release", "compliance.resolve", "fraud.review"];
+    const networkOnly = [
+      "offers.approve",
+      "ledger.adjust",
+      "payouts.approve",
+      "payouts.release",
+      "compliance.resolve",
+      "fraud.review",
+      "advertisers.review",
+    ];
     for (const [role, keys] of byRole) {
       if (["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_MANAGER", "COMPLIANCE_MANAGER"].includes(role)) continue;
       expect(keys.filter((k) => networkOnly.includes(k)), role).toEqual([]);

@@ -40,6 +40,10 @@ export const PERMISSION_KEYS = [
   "compliance.resolve",
   // audit
   "audit.read",
+  // advertisers (Phase 2 Unit 1, migration 0005)
+  "advertisers.read",
+  "advertisers.manage",
+  "advertisers.review",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
