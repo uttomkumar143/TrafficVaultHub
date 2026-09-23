@@ -24,9 +24,9 @@ Completion           : 17 / 96 = 17.7 %
 Calculation basis: unit rows below; documentation-only rows (STATE.md units)
 count as one unit each exactly as the prompts list them.
 
-Last verified: 2026-09-23 against `main` @ `ae79927` (backend 104/104 in 13
+Last verified: 2026-09-23 against `main` @ `9244833` (backend 104/104 in 13
 files, frontend 42/42, both typechecks, both builds, secret scan CLEAN, CI run
-35900069638 success). Unit counts are unchanged since `6cb294c`; the 8 extra
+35902166461 success). Unit counts are unchanged since `6cb294c`; the 8 extra
 backend tests come from the shared `lib/pagination.ts` and `lib/request-meta.ts`
 helpers (not phase units — see STATE.md).
 
@@ -64,23 +64,28 @@ scope.**
 | 5.3 | Never skip authorization | COMPLETE | fail-closed middleware (`require-org.ts`) |
 | 5.4 | Never expose secrets to frontend/logs/errors | COMPLETE | no `VITE_*` secrets; `routes/secret-exposure.test.ts`; error envelope has no stack |
 | 6.1 | Small independently-committable increments | COMPLETE | git history is one unit per commit |
-| 6.2 | Follow `02-AUTO-COMMIT-PROTOCOL.md` | OUT OF SCOPE | 02 not yet issued to the agent |
+| 6.2 | Follow `02-AUTO-COMMIT-PROTOCOL.md` | COMPLETE | 02 issued and applied 2026-09-23 (session at `9244833`); history already one unit per commit with `<type>(<module>)` messages, every commit pushed, STATE.md updated alongside |
 | 6.3 | STATE.md continuously current | COMPLETE | brought current at this commit (was 4 commits stale) |
 | 6.4 | Self-decompose large tasks | COMPLETE | evidenced by history |
 | 7 | Acknowledge and wait before coding | COMPLETE | no phase code written in the 01 audit session |
 
 ## Phase 0 — Bootstrap (`03-PHASE0-BOOTSTRAP.md`) — COMPLETE 8/8
 
-| Unit | Requirement | Status | Evidence | Tests | Commits |
-|------|-------------|--------|----------|-------|---------|
-| 0.1 | Repo scaffolding (PRD §121 layout, .gitignore, README) | COMPLETE | tree matches §121 | — | `2d4c17f`.. |
-| 0.2 | Backend skeleton (Workers + Hono, `/api/v1/health`, bindings, error envelope §72) | COMPLETE | `backend/src/{app,index}.ts`, `routes/health.ts` | `health.test.ts` | Phase 0 |
-| 0.3 | Frontend skeleton (React+Vite+TS, Tailwind, shadcn, Router, TanStack Query) | COMPLETE | `frontend/` | app smoke test | Phase 0 |
-| 0.4 | First migration `0001_initial.sql` | COMPLETE | `migrations/0001_initial.sql` | `d1-sqlite.test.ts` | Phase 0 |
-| 0.5 | Testing setup (vitest both sides, D1 shim on real migrations) | COMPLETE | `backend/src/test/d1-sqlite.ts` | shim tests | Phase 0 |
-| 0.6 | CI skeleton | COMPLETE | `.github/workflows/ci.yml` active, green | CI runs | `748c3f7` |
-| 0.7 | Docs (ADR dir, architecture overview, runbook) | COMPLETE | `docs/{adr,architecture,runbooks}` | — | Phase 0 |
-| 0.8 | STATE.md | COMPLETE | `STATE.md` | — | `c25f376` |
+Re-audited 2026-09-23 at `9244833` against each unit's Definition of Done
+(everything below was actually executed in that session, not inferred).
+
+| Unit | Requirement | Status | Evidence (verified) | Tests | Commit(s) |
+|------|-------------|--------|---------------------|-------|-----------|
+| 0.1 | Repo scaffolding: PRD §121 dirs, `docs/PRD.md` unmodified, `.gitignore` (node_modules/.env/.dev.vars/dist/.wrangler) | COMPLETE | all 20 required dirs present; PRD content unchanged since `c029031` (`2d4c17f` is a pure rename); all 5 ignore patterns present | — | `2d4c17f` |
+| 0.2 | Backend skeleton: Workers + Hono, `GET /api/v1/health` → `{status:"ok"}`, wrangler config with placeholder D1/KV/R2/Queues/DO bindings | COMPLETE | `backend/src/{index,app}.ts`, `routes/health.ts`, `wrangler.jsonc` (placeholder ids only); live `wrangler dev` → `curl /api/v1/health` = `200 {"status":"ok"}`; typecheck + dry-run build PASS | `health.test.ts` | `ce313d9`, `97ece02` (DO binding) |
+| 0.3 | Frontend skeleton: React+Vite+TS, Tailwind + shadcn/ui, React Router home route, TanStack Query provider, layout shell; `npm run build` zero errors | COMPLETE | `frontend/` (`components.json`, `components/ui/*`, `routes/index.tsx`, `app/providers.tsx`, `components/layout/app-shell.tsx`); typecheck PASS; `vite build` PASS (chunk-size warning only) | `app/app.test.tsx` | `9a8b993` |
+| 0.4 | `migrations/0001_initial.sql`: exactly organizations/users/organization_members/roles/permissions/role_permissions; UTC timestamps; no money fields | COMPLETE | file contains exactly those 6 tables, `strftime(...Z)` UTC TEXT defaults, no monetary columns; `wrangler d1 migrations apply trafficvaulthub-db --local` applies 0001–0005 cleanly | `test/d1-sqlite.test.ts` | `722f9bb` |
+| 0.5 | Test runner both sides with one passing smoke test each | COMPLETE | backend Vitest 104/104 (13 files); frontend Vitest+jsdom 42/42 (5 files) | `health.test.ts`, `app.test.tsx` | `d4d52c9`, `ce96416` |
+| 0.6 | `.github/workflows/ci.yml`: on push, install/typecheck/test/build for frontend and backend | COMPLETE | valid YAML (jobs `backend`, `frontend`, `secret-scan`); run 35902166461 on `9244833` = success | CI runs | `aa8f2ee` → activated `22b13e9`, green from `748c3f7` |
+| 0.7 | `README.md` (paragraph, stack, local run) + `docs/architecture/overview.md` (modules, multi-tenant model, links to PRD) | COMPLETE | both exist; every README command re-executed this session (`npm ci`, `typecheck`, `test`, `build`, `wrangler dev`, `d1 migrations apply/execute`) | — | `b954b35` |
+| 0.8 | `STATE.md` from template, Phase 0 recorded as complete, next unit → Phase 1 | COMPLETE | `STATE.md` current; Phase 0 marked complete at `c25f376` with next = Phase 1 | — | `c25f376` |
+
+Phase 0 DoD: both builds PASS · CI file valid · `/api/v1/health` works via `wrangler dev` · 8 separate unit commits pushed · STATE.md reflected Phase 0 complete with next = Phase 1 (`c25f376`). **All satisfied.**
 
 ## Phase 1 — Identity & Tenancy (`04-PHASE1-IDENTITY-TENANCY.md`) — COMPLETE 9/9
 

@@ -5,8 +5,11 @@
 ## Current Phase
 Phase 2 — Advertisers, Affiliates, Offers & Marketplace (`05-PHASE2-OFFERS-MARKETPLACE.md`)
 
-Phase 0 is COMPLETE (`2d4c17f`..`c25f376`). Phase 1 is COMPLETE (verified
-2026-09-23 against `main` @ `2c30922`; see table). Do not redo either.
+Phase 0 is COMPLETE (`2d4c17f`..`c25f376`; CI activated later at `22b13e9`,
+green since `748c3f7`) — re-audited unit-by-unit against `03-PHASE0-BOOTSTRAP.md`
+on 2026-09-23 at `9244833` (see "Phase 0 re-audit" block below). Phase 1 is
+COMPLETE (verified 2026-09-23 against `main` @ `2c30922`; see table). Do not
+redo either.
 
 ## Phase 1 — COMPLETE (all 9 units)
 
@@ -84,17 +87,22 @@ Phase 0 is COMPLETE (`2d4c17f`..`c25f376`). Phase 1 is COMPLETE (verified
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 1 Unit 9 — Phase 1 recorded complete (`e808930`). Phase 2 Unit 1 in progress (see table).
+Docs-only: `02-AUTO-COMMIT-PROTOCOL.md` acknowledged and applied; Phase 0
+re-audited against `03-PHASE0-BOOTSTRAP.md` (8/8 COMPLETE, no gaps, no code
+changed). Last code unit: Phase 2 Unit 1 partial (`6cb294c`) + shared libs (`ae79927`).
 
 Master requirement map: `docs/CHECKLIST.md` (one row per prompt unit; verified statuses).
 
 ## Next Planned Unit
-Phase 2 Unit 1 — Advertiser module (PRD §16, §17, §92 `advertiser_profiles`):
-migration `0005_advertisers.sql` (+ `advertisers.read/manage/review` keys),
-`modules/advertisers/{state-machine,repository,service}.ts`, tenant routes
-`/api/v1/organizations/:orgId/advertiser` (get/upsert/submit) and platform review
+WAITING for the next phase instruction (hard stop after the 02 + 03 session;
+Phase 1 and later must not be started without an explicit prompt).
+When phase work resumes, the exact next unit is Phase 2 Unit 1 (continued) —
+Advertiser module (PRD §16, §17, §92): `modules/advertisers/repository.ts`
+(TenantId + `scopedQuery`), then `service.ts`, tenant routes
+`/api/v1/organizations/:orgId/advertiser` (get/upsert/submit), platform review
 routes `/api/v1/platform/:orgId/advertisers` (cursor list, get, transition with
-reason), integration + tenant-isolation tests, ADR-003.
+reason), integration + tenant-isolation tests, ADR-003. Migration `0005` and
+`state-machine.ts` already exist — do not recreate them.
 
 ## Open Questions / Blockers
 - Device metadata limited to `ip_address` + `user_agent` (PRD §12 satisfied at that level).
@@ -112,43 +120,58 @@ reason), integration + tenant-isolation tests, ADR-003.
 - `docs/BUILD_PROGRESS.md` is a STALE historical snapshot; this file is the source of truth.
 - Local dev: `cd backend && npm ci && npx wrangler d1 migrations apply trafficvaulthub-db --local && npm run dev` (port 8787); `cd frontend && npm ci && npm run dev`.
 
-## Master prompt audit (`01-MASTER-SYSTEM-PROMPT.md`) — handoff block
+## Prompt-kit status — handoff block
 
 ```
-CURRENT MASTER PROMPT:   01-MASTER-SYSTEM-PROMPT.md
-MASTER PROMPT STATUS:    24 completed / 24 applicable requirements
-                         (26 rows total: §1 "Cloudflare Pages hosting" and §6
-                         "follow 02-AUTO-COMMIT-PROTOCOL" are out of scope —
-                         deployment = Phase 9; 02 not yet issued)
-CURRENT REQUIREMENT:     §6 "keep STATE.md continuously up to date" (this block)
-STATUS:                  COMPLETE
-LAST VERIFIED COMMIT:    ae79927 = code baseline (all tests/builds above ran here);
-                         626c914 = this audit's docs/hygiene commit (no src change)
-LAST VERIFIED origin/main: 626c914 (pushed and fetched back this session)
-TESTS (run this session, sandbox Node 22.23.2, fresh `npm ci`):
-  backend:  npm run typecheck PASS · npm test 104/104 (13 files) PASS ·
-            npm run build (wrangler --dry-run) PASS
-  frontend: npm run typecheck PASS · npm test 42/42 (5 files) PASS ·
-            npm run build PASS
-  bash scripts/secret-scan.sh → CLEAN (139 files)
-  migrations 0001–0005: exactly one commit each (never edited after landing)
-  CI on origin/main ae79927: success (run 35900069638)
-FILES CHANGED (this session): STATE.md, docs/CHECKLIST.md, README.md,
-  .github/workflows-pending/ (deleted — duplicate of .github/workflows/ci.yml)
-BUGS FIXED: none required (no §2/§5 violation found in existing code)
-BLOCKERS: none for 01. Cloudflare resource IDs / credentials remain a Phase 9
-  blocker and are NOT a 01 requirement.
-NEXT EXACT ACTION: wait for 02-AUTO-COMMIT-PROTOCOL.md. Do NOT start Phase 0+
-  work under the 01-only instruction. When phase work resumes: Phase 2 Unit 1
-  advertiser repository (`modules/advertisers/repository.ts`, TenantId +
-  scopedQuery), then service, routes, tests.
+01-MASTER-SYSTEM-PROMPT.md   audited COMPLETE (24/24 applicable; matrix in
+                             docs/CHECKLIST.md). Code baseline ae79927.
+02-AUTO-COMMIT-PROTOCOL.md   ACKNOWLEDGED + APPLIED (this session). Binding
+                             rules: one small unit per commit; `git add -A`,
+                             `<type>(<module>): <desc>` with type in
+                             feat|fix|chore|docs|test|refactor|migration,
+                             `git push origin main` after EVERY unit (retry
+                             once, then report — never claim); STATE.md
+                             updated in the same or an immediate follow-up
+                             commit; never commit secrets (.env/.dev.vars
+                             git-ignored; `.example` placeholders only).
+03-PHASE0-BOOTSTRAP.md       COMPLETE 8/8 — re-audit 2026-09-23 at 9244833:
+  U1 scaffolding   COMPLETE  all PRD §121 dirs present; .gitignore covers
+                             node_modules/.env/.dev.vars/dist/.wrangler;
+                             docs/PRD.md unmodified since c029031 (rename only)
+  U2 backend       COMPLETE  backend/ Workers+Hono; wrangler.jsonc placeholder
+                             D1/KV/R2/Queues/DO bindings; `wrangler dev` →
+                             curl /api/v1/health = 200 {"status":"ok"} (run live)
+  U3 frontend      COMPLETE  React+Vite+TS, Tailwind 4, shadcn (components.json,
+                             ui/*), React Router 7, TanStack Query provider,
+                             AppShell layout; `npm run build` 0 errors
+  U4 migration     COMPLETE  0001_initial.sql = exactly the 6 tables, UTC TEXT
+                             timestamps, no money columns; `wrangler d1
+                             migrations apply --local` 0001–0005 all ✅
+  U5 testing       COMPLETE  vitest both sides; health.test.ts + app.test.tsx
+  U6 CI            COMPLETE  .github/workflows/ci.yml valid YAML (jobs backend,
+                             frontend, secret-scan); run 35902166461 on 9244833
+                             = success
+  U7 docs          COMPLETE  README.md (paragraph, stack, local run — every
+                             command re-executed this session) +
+                             docs/architecture/overview.md (modules, tenancy,
+                             links to PRD)
+  U8 STATE.md      COMPLETE  exists, current (this file)
+  Separate commits per unit: 2d4c17f ce313d9 9a8b993 722f9bb d4d52c9/ce96416
+                             aa8f2ee→22b13e9 b954b35 c25f376
+VERIFICATION (this session, sandbox Node 22.23.2 / npm 10.9.8, fresh `npm ci`):
+  backend:  typecheck PASS · test 104/104 (13 files) PASS · build (dry-run) PASS
+  frontend: typecheck PASS · test 42/42 (5 files) PASS · build PASS
+  scripts/secret-scan.sh → CLEAN (137 files)
+FILES CHANGED (this session): STATE.md, docs/CHECKLIST.md only (docs)
+BUGS FIXED / DUPLICATES FOUND: none — no Phase 0 gap, no duplicate work
+BLOCKERS: none for Phase 0. Cloudflare IDs/credentials remain a Phase 9 item.
+NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
+  04-PHASE1 or later automatically. (When resumed: Phase 2 Unit 1 repository.)
 ```
-
-Requirement-by-requirement matrix for 01 lives in `docs/CHECKLIST.md`
-(section "Master prompt 01 — architecture constitution").
 
 ## Last Updated
-2026-09-23 18:40 UTC — master-prompt (01) audit session: re-verified at `ae79927`
-(backend 104/104, frontend 42/42, both typechecks, both builds, secret scan CLEAN,
-CI green). Recorded the 4 lib commits (`993e577`..`ae79927`) that earlier
-STATE.md revisions missed. Phase 2 Unit 1 remains PARTIAL; no phase work done.
+2026-09-23 18:45 UTC — 02 protocol + 03 Phase 0 audit session at `9244833`:
+02 acknowledged/applied; Phase 0 re-verified 8/8 including live `wrangler dev`
+health probe and `wrangler d1 migrations apply --local`; backend 104/104,
+frontend 42/42, both typechecks, both builds, secret scan CLEAN, CI green.
+No source code changed; no Phase 1+ work started.
