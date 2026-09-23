@@ -7,7 +7,7 @@
  * `401` observed by `apiRequest`) the query is disabled and every cached
  * server-state entry is dropped so no tenant data outlives the session.
  */
-import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isApiError } from "@/lib/api";
 import {
@@ -54,11 +54,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     staleTime: 60_000,
   });
 
-  // Whenever the session ends, purge everything cached under it.
+  // When a session ENDS (token present → absent), purge everything cached
+  // under it so no tenant data outlives the session. Public queries issued
+  // while already signed out (e.g. health) are left alone.
+  const previousToken = useRef<string | null>(token);
   useEffect(() => {
-    if (token === null) {
+    if (previousToken.current !== null && token === null) {
       queryClient.removeQueries();
     }
+    previousToken.current = token;
   }, [token, queryClient]);
 
   const loginMutation = useMutation({
