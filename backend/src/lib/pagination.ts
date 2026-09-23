@@ -88,6 +88,7 @@ export function slicePage<T extends { created_at: string; id: string }>(rows: T[
   if (rows.length <= limit) return { items: rows, next_cursor: null };
   const items = rows.slice(0, limit);
   const last = items[items.length - 1];
+  if (!last) return { items, next_cursor: null };
   return { items, next_cursor: encodeCursor({ created_at: last.created_at, id: last.id }) };
 }
 
