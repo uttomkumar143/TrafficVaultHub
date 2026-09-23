@@ -1,0 +1,101 @@
+# TrafficVaultHub — Continuous Integration
+#
+# Runs on every push and pull request. For each independent npm project
+# (`frontend/`, `backend/`) it installs dependencies from the lockfile, then
+# runs typecheck → tests → build. This is the safety net independent of any
+# AI chat session (Phase 0, Unit 6).
+#
+# No secrets are required: the backend build is a `wrangler deploy --dry-run`
+# and never contacts Cloudflare.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  # Never send anonymous Wrangler telemetry from CI.
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  backend:
+    name: Backend (Cloudflare Workers + Hono)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build (wrangler dry-run)
+        run: npm run build
+
+  frontend:
+    name: Frontend (React + Vite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan tracked files for credential patterns
+        run: bash scripts/secret-scan.sh
