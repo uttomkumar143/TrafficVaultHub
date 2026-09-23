@@ -21,11 +21,11 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../lib/bindings";
-import { AppError, requestId } from "../lib/errors";
+import { AppError } from "../lib/errors";
+import { requestMeta as meta } from "../lib/request-meta";
 import { parseJsonBody } from "../lib/validation";
 import { requireAuth } from "../middleware/require-auth";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../modules/auth/constants";
-import type { RequestMeta } from "../modules/auth/repository";
 
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
 const passwordSchema = z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH);
@@ -42,14 +42,6 @@ const loginSchema = z.object({ email: emailSchema, password: z.string().min(1).m
 const resetSchema = z.object({ token: tokenSchema, password: passwordSchema });
 /** Session ids are application-generated UUIDs (migration 0002). */
 const sessionIdSchema = z.string().uuid();
-
-function meta(c: { req: { header(name: string): string | undefined } }): RequestMeta {
-  return {
-    ip_address: c.req.header("cf-connecting-ip") ?? null,
-    user_agent: c.req.header("user-agent")?.slice(0, 512) ?? null,
-    request_id: requestId(c as never),
-  };
-}
 
 export const authRoutes = new Hono<AppEnv>();
 

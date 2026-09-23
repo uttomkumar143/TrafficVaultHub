@@ -20,11 +20,11 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../lib/bindings";
-import { AppError, requestId } from "../lib/errors";
+import { AppError } from "../lib/errors";
+import { requestMeta as meta } from "../lib/request-meta";
 import { parseJsonBody } from "../lib/validation";
 import { requireAuth } from "../middleware/require-auth";
 import { requireOrg, requirePermission } from "../middleware/require-org";
-import type { RequestMeta } from "../modules/auth/repository";
 import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
 
 const nameSchema = z.string().trim().min(2).max(120);
@@ -50,14 +50,6 @@ const addMemberSchema = z.object({
   role: roleKeySchema,
 });
 const changeRoleSchema = z.object({ role: roleKeySchema });
-
-function meta(c: { req: { header(name: string): string | undefined } }): RequestMeta {
-  return {
-    ip_address: c.req.header("cf-connecting-ip") ?? null,
-    user_agent: c.req.header("user-agent")?.slice(0, 512) ?? null,
-    request_id: requestId(c as never),
-  };
-}
 
 /** Malformed member ids can never match a row → same 404 as unknown ids (no oracle). */
 function memberId(c: { req: { param(name: string): string | undefined } }): string {
