@@ -49,7 +49,8 @@ describe("cursor pagination (PRD §127)", () => {
     const full = slicePage(rows, 3);
     expect(full.items).toHaveLength(3);
     expect(full.next_cursor).not.toBeNull();
-    expect(decodeCursor(full.next_cursor!)).toEqual({ created_at: rows[2].created_at, id: rows[2].id });
+    const third = rows[2]!;
+    expect(decodeCursor(full.next_cursor!)).toEqual({ created_at: third.created_at, id: third.id });
 
     const last = slicePage(rows.slice(0, 2), 3);
     expect(last.items).toHaveLength(2);
