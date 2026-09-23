@@ -70,7 +70,7 @@ describe("apiRequest", () => {
       ),
     );
 
-    const err = await apiRequest("/auth/login", { method: "POST", body: {}, auth: false }).catch(
+    const err: ApiError = await apiRequest<never>("/auth/login", { method: "POST", body: {}, auth: false }).catch(
       (e: unknown) => e as ApiError,
     );
     expect(err).toBeInstanceOf(ApiError);
@@ -84,7 +84,7 @@ describe("apiRequest", () => {
 
   it("falls back to HTTP_<status> when the body is not an envelope", async () => {
     fetchMock.mockResolvedValueOnce(new Response("gateway down", { status: 502 }));
-    const err = await apiRequest("/auth/me").catch((e: unknown) => e as ApiError);
+    const err: ApiError = await apiRequest<never>("/auth/me").catch((e: unknown) => e as ApiError);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe("HTTP_502");
     expect(err.status).toBe(502);
