@@ -17,6 +17,11 @@ import {
  * stubbed `/api/v1/auth/*` contract, server error surfacing, and navigation.
  * A placeholder `/app` route is not part of the public table yet, so the
  * post-login redirect is asserted via the router location.
+ *
+ * Fixture note: passwords/tokens below are synthetic. They deliberately contain
+ * spaces or dots so they read as obvious test data and are not mistaken for
+ * real credentials by `scripts/secret-scan.sh`, while still satisfying the
+ * schema limits (password >= 10 chars, token >= 16 chars).
  */
 describe("auth pages", () => {
   let fetchStub: FetchStub;
@@ -125,7 +130,7 @@ describe("auth pages", () => {
     it("creates the account and shows the check-your-email state", async () => {
       fetchStub = stubFetch({
         "POST /api/v1/auth/signup": ({ body }) => {
-          expect(body).toEqual({ email: "bob@example.com", password: "a-long-enough-password", display_name: "Bob" });
+          expect(body).toEqual({ email: "bob@example.com", password: "a long enough password", display_name: "Bob" });
           return { status: 201, json: { user: makeUser({ email: "bob@example.com", email_verified: false }) } };
         },
       });
@@ -134,8 +139,8 @@ describe("auth pages", () => {
 
       await user.type(screen.getByLabelText("Name (optional)"), "Bob");
       await user.type(screen.getByLabelText("Email"), "bob@example.com");
-      await user.type(screen.getByLabelText("Password"), "a-long-enough-password");
-      await user.type(screen.getByLabelText("Confirm password"), "a-long-enough-password");
+      await user.type(screen.getByLabelText("Password"), "a long enough password");
+      await user.type(screen.getByLabelText("Confirm password"), "a long enough password");
       await user.click(screen.getByRole("button", { name: "Create account" }));
 
       expect(await screen.findByRole("heading", { level: 1, name: "Check your email" })).toBeInTheDocument();
@@ -152,8 +157,8 @@ describe("auth pages", () => {
       const user = userEvent.setup();
 
       await user.type(screen.getByLabelText("Email"), "bob@example.com");
-      await user.type(screen.getByLabelText("Password"), "a-long-enough-password");
-      await user.type(screen.getByLabelText("Confirm password"), "a-long-enough-password");
+      await user.type(screen.getByLabelText("Password"), "a long enough password");
+      await user.type(screen.getByLabelText("Confirm password"), "a long enough password");
       await user.click(screen.getByRole("button", { name: "Create account" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent("An account with this email already exists.");
@@ -164,11 +169,11 @@ describe("auth pages", () => {
     it("auto-submits a token from the query string and redirects to /login with a notice", async () => {
       fetchStub = stubFetch({
         "POST /api/v1/auth/verify-email": ({ body }) => {
-          expect(body).toEqual({ token: "0123456789abcdef0123" });
+          expect(body).toEqual({ token: "test.verify.token.0123456789" });
           return { json: { user: makeUser() } };
         },
       });
-      const { router } = renderWithProviders(routes, { initialPath: "/verify-email?token=0123456789abcdef0123" });
+      const { router } = renderWithProviders(routes, { initialPath: "/verify-email?token=test.verify.token.0123456789" });
 
       await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
       expect(await screen.findByText("Email verified. You can sign in now.")).toBeInTheDocument();
@@ -185,7 +190,7 @@ describe("auth pages", () => {
       renderWithProviders(routes, { initialPath: "/verify-email" });
       const user = userEvent.setup();
 
-      await user.type(screen.getByLabelText("Verification code"), "0123456789abcdef0123");
+      await user.type(screen.getByLabelText("Verification code"), "test.verify.token.0123456789");
       await user.click(screen.getByRole("button", { name: "Verify email" }));
       expect(await screen.findByRole("alert")).toHaveTextContent("This link is invalid or has expired.");
 
@@ -216,16 +221,16 @@ describe("auth pages", () => {
     it("resets the password with the token from the link and returns to /login", async () => {
       fetchStub = stubFetch({
         "POST /api/v1/auth/reset-password": ({ body }) => {
-          expect(body).toEqual({ token: "fedcba9876543210fedc", password: "brand-new-password-1" });
+          expect(body).toEqual({ token: "test.reset.token.9876543210", password: "brand new password 1" });
           return { status: 204 };
         },
       });
-      const { router } = renderWithProviders(routes, { initialPath: "/reset-password?token=fedcba9876543210fedc" });
+      const { router } = renderWithProviders(routes, { initialPath: "/reset-password?token=test.reset.token.9876543210" });
       const user = userEvent.setup();
 
-      expect(screen.getByLabelText("Reset code")).toHaveValue("fedcba9876543210fedc");
-      await user.type(screen.getByLabelText("New password"), "brand-new-password-1");
-      await user.type(screen.getByLabelText("Confirm new password"), "brand-new-password-1");
+      expect(screen.getByLabelText("Reset code")).toHaveValue("test.reset.token.9876543210");
+      await user.type(screen.getByLabelText("New password"), "brand new password 1");
+      await user.type(screen.getByLabelText("Confirm new password"), "brand new password 1");
       await user.click(screen.getByRole("button", { name: "Update password" }));
 
       await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
@@ -236,11 +241,11 @@ describe("auth pages", () => {
       fetchStub = stubFetch({
         "POST /api/v1/auth/reset-password": () => ({ status: 400, json: errorEnvelope("INVALID_TOKEN") }),
       });
-      renderWithProviders(routes, { initialPath: "/reset-password?token=fedcba9876543210fedc" });
+      renderWithProviders(routes, { initialPath: "/reset-password?token=test.reset.token.9876543210" });
       const user = userEvent.setup();
 
-      await user.type(screen.getByLabelText("New password"), "brand-new-password-1");
-      await user.type(screen.getByLabelText("Confirm new password"), "brand-new-password-1");
+      await user.type(screen.getByLabelText("New password"), "brand new password 1");
+      await user.type(screen.getByLabelText("Confirm new password"), "brand new password 1");
       await user.click(screen.getByRole("button", { name: "Update password" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent("This link is invalid or has expired.");
