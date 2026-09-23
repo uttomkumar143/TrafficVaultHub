@@ -122,8 +122,9 @@ MASTER PROMPT STATUS:    24 completed / 24 applicable requirements
                          deployment = Phase 9; 02 not yet issued)
 CURRENT REQUIREMENT:     §6 "keep STATE.md continuously up to date" (this block)
 STATUS:                  COMPLETE
-LAST VERIFIED COMMIT:    ae79927 (audit baseline; see git log for this commit)
-LAST VERIFIED origin/main: ae79927 (before this session's commits)
+LAST VERIFIED COMMIT:    ae79927 = code baseline (all tests/builds above ran here);
+                         626c914 = this audit's docs/hygiene commit (no src change)
+LAST VERIFIED origin/main: 626c914 (pushed and fetched back this session)
 TESTS (run this session, sandbox Node 22.23.2, fresh `npm ci`):
   backend:  npm run typecheck PASS · npm test 104/104 (13 files) PASS ·
             npm run build (wrangler --dry-run) PASS
