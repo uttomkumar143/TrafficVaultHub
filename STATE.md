@@ -18,7 +18,7 @@ Phase 1 unit status (verified 2026-09-22 against `main` @ `c1e0d8f`):
 | 4 | RBAC middleware — `migrations/0004_permissions.sql` (PRD §10 catalogue + `organizations.*`/`members.*`, `role_permissions` for 14 roles); `middleware/require-org.ts` (`requireOrg`: `:orgId` → ACTIVE membership → role → permission keys as `c.get("tenant")`, non-member → 404; `requirePermission(key)` → 403); `modules/rbac/permissions.ts` typed keys (parity test vs DB); `OrganizationService.resolveTenant`; organizations routes now permission-keyed (`organizations.read/update`, `members.read/manage`) + owner-seat guard (`assertOwner`); `GET /:orgId/me`. ADR-002 §5. 10 tests in `routes/rbac.test.ts`. | COMPLETE | `745a062`, `39433eb` |
 | 5 | Tenant isolation enforcement — `lib/tenant-scope.ts` (branded `TenantId` via `tenantIdOf(TenantContext)` only; `scopedQuery()` throws `UnscopedQueryError` unless first placeholder is `organization_id = ?`) + 7 unit tests; explicit PRD §116 suite `routes/tenant-isolation.test.ts` (7 tests, two tenants A/B). ADR-002 §6. Phase 2 repositories MUST accept `TenantId` and use `scopedQuery`. | COMPLETE | `c1e0d8f` |
 | 6 | Migrations | DONE — `0002_identity.sql`, `0003_organizations.sql`, `0004_permissions.sql` (all additive; never edit applied migrations). | `39c201b`, `0d617a7`, `745a062` |
-| 7 | Frontend auth pages + auth context + route guards | NOT STARTED | — |
+| 7 | Frontend auth pages + auth context + route guards | PARTIAL — done: `lib/api.ts` bearer session store + `ApiError` + 401 handling (`69fcf51`, `d2f876d`); `features/auth/{api,auth-context,use-auth,schemas}.ts` over TanStack Query (`ed1bfcb`); pages `/login`, `/signup`, `/verify-email`, `/forgot-password`, `/reset-password` with RHF + Zod, `FormField`, `AuthLayout`, auth-aware `AppShell` nav (`0b023eb`). 29 frontend tests. Still open: `features/organizations/` (org list/switcher, `useTenant`), route guards `components/auth/{require-auth,require-permission}.tsx`, authenticated `/app` shell + `/app/:orgId/members`, guard tests. | `69fcf51`, `d2f876d`, `ed1bfcb`, `0b023eb`, `748c3f7` |
 | 8 | Security tests (unauthorized, expired session, cross-tenant, role escalation) | PARTIAL — unauthorized + revoked/expired + inactive-user (`routes/auth.test.ts`), cross-USER session isolation (`routes/auth-sessions.test.ts`), cross-TENANT → 404 + body `organization_id` ignored + removed membership (`routes/rbac.test.ts`, `routes/organizations.test.ts`), ROLE ESCALATION → 403 for VIEWER/AFFILIATE_USER and manager-mints-owner (`routes/rbac.test.ts`). Cross-tenant explicit suite `routes/tenant-isolation.test.ts` (Unit 5). Still open for Unit 8: invalid API key / replayed webhook (Phase 6 scope), secret-never-returned-to-frontend assertion once frontend exists (Unit 7). | `39433eb`, `c1e0d8f` |
 | 9 | STATE.md → Phase 1 complete | pending | — |
 
@@ -76,25 +76,40 @@ Phase 1 unit status (verified 2026-09-22 against `main` @ `c1e0d8f`):
   `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`, `LAST_OWNER`, `SELF_MODIFICATION`.
 - No secrets required yet; `.dev.vars.example` documents vars.
 
+### CI status (verified 2026-09-23 against `main` @ `748c3f7`)
+- `.github/workflows/ci.yml` is ACTIVE (`22b13e9`). Jobs: `backend`,
+  `frontend`, `secret-scan`. Run for `748c3f7`
+  (https://github.com/uttomkumar143/TrafficVaultHub/actions/runs/35825879164)
+  → all three jobs success.
+- `0b023eb` failed only `secret-scan`: the generic
+  `(password|token)="<16+ chars of [A-Za-z0-9/+_=-]>"` pattern matched three
+  synthetic fixtures in `frontend/src/routes/auth/auth-pages.test.tsx`
+  (fake signup/reset passwords and fake verify/reset tokens — never real
+  credentials). Fixed in `748c3f7` by making the fixtures contain spaces/dots
+  (outside the pattern's charset) while still meeting schema limits. Scanner
+  and CI job unchanged. Local re-verification at `748c3f7`: backend 85/85,
+  frontend 29/29, typecheck + build both projects, secret scan CLEAN (118 files).
+- `.github/workflows-pending/` is now a stale duplicate of the active file
+  (safe to delete in a housekeeping commit; not required).
+
 ## Last Completed Unit
 Phase 1, Unit 5 — tenant-scoping helper + explicit PRD §116 cross-tenant suite
-(`c1e0d8f`; on `main`). Units 1–6 of Phase 1 are now COMPLETE.
+(`c1e0d8f`; on `main`). Units 1–6 of Phase 1 are COMPLETE. Unit 7 is PARTIAL
+(steps 1–3 below done through `0b023eb`; CI green at `748c3f7`).
 
 ## Next Planned Unit
-Phase 1, Unit 7 — Frontend auth + org context (phase prompt unit 7; PRD §12,
-§86–90 shell). Frontend is currently a Phase 0 skeleton
-(`frontend/src/{app,routes/home,components/layout/app-shell,lib/api,hooks/use-health}`,
-React 18 + Vite + TS + Tailwind + shadcn `button` + React Router + TanStack
-Query; vitest with 1 test). Implement, committing per page:
-1. `frontend/src/lib/api.ts`: bearer token support (token kept in memory +
-   `sessionStorage`; never log it), uniform `ApiError` from the PRD §72
-   envelope, `401` → clear session.
-2. `features/auth/`: `auth-context.tsx` (TanStack Query `["auth","me"]` over
-   `GET /api/v1/auth/me`; login/logout/signup mutations), `use-auth.ts`.
-3. Pages (React Hook Form + Zod, loading/error/empty states, a11y labels):
-   `routes/auth/{login,signup,verify-email,forgot-password,reset-password}-page.tsx`
-   wired to `POST /auth/login|signup|verify-email|forgot-password|reset-password`
-   and `POST /auth/resend-verification`.
+Phase 1, Unit 7 (continue) — Frontend org context + route guards + minimal
+authenticated shell (phase prompt unit 7; PRD §12, §86–90 shell). Steps 1–3
+are DONE; resume at step 4, committing per step:
+1. DONE — `frontend/src/lib/api.ts` + `lib/session-store.ts`: bearer token
+   (memory + `sessionStorage`; never logged), uniform `ApiError` from the PRD
+   §72 envelope, `401` → clear session.
+2. DONE — `features/auth/`: `auth-context.tsx` (TanStack Query
+   `["auth","me"]` over `GET /api/v1/auth/me`; login/logout mutations),
+   `use-auth.ts`, `api.ts`, `schemas.ts`.
+3. DONE — pages `routes/auth/{login,signup,verify-email,forgot-password,reset-password}-page.tsx`
+   (RHF + Zod, `FormField`, `AuthLayout`, error mapping in `lib/error-message.ts`);
+   13 page tests in `routes/auth/auth-pages.test.tsx`.
 4. `features/organizations/`: org list/switcher over `GET /organizations`,
    `useTenant(orgId)` over `GET /organizations/:orgId/me` (role + permission
    keys for UI gating only).
@@ -104,24 +119,18 @@ Query; vitest with 1 test). Implement, committing per page:
 6. Minimal authenticated shell: `/app` (org switcher + `/app/:orgId/members`
    page using `GET /organizations/:orgId/members`, add/change/remove buttons
    gated on `members.manage`).
-7. Tests: page render + validation + mocked API (vitest + Testing Library),
-   guard redirects, `npm run typecheck && npm test && npm run build` in
-   `frontend/`; `.github/workflows-pending/ci.yml` already has a `frontend`
-   job.
+7. Tests: guard redirects + org switcher/members page with mocked API (vitest
+   + Testing Library); `npm run typecheck && npm test && npm run build` in
+   `frontend/`; CI `frontend` job runs them on push.
+   Fixture rule: never use fixture passwords/tokens that are ≥16 chars of
+   only `[A-Za-z0-9/+_=-]` — `scripts/secret-scan.sh` flags them. Use values
+   with spaces/dots (e.g. `"a long enough password"`, `"test.verify.token.0123456789"`).
 8. Update STATE.md; then Unit 8 (remaining security tests incl. "secret never
    returned to frontend"), Unit 9 (Phase 1 complete → Phase 2 offers).
 
 ## Open Questions / Blockers
-- **CI activation still needs a human.** Last attempt 2026-09-22 16:15 UTC:
-  GitHub rejected the push —
-  `refusing to allow a GitHub App to create or update workflow
-  .github/workflows/ci.yml without workflows permission`. Not retried in the
-  Unit 2 session (out of scope). Validated workflow remains at
-  `.github/workflows-pending/ci.yml` (jobs `backend`, `frontend`,
-  `secret-scan`). Fix — one of:
-  (a) human runs `git mv .github/workflows-pending/ci.yml .github/workflows/ci.yml && git rm .github/workflows-pending/README.md`, commit, push;
-  (b) grant the Genspark GitHub App *Workflows: read & write* on this repo;
-  (c) create the file via the GitHub web UI.
+- CI activation blocker RESOLVED (`22b13e9`; workflow active and green — see
+  "CI status" above). No open CI blocker.
 - Device metadata is limited to `ip_address` + `user_agent` captured at
   login (PRD §12 "device/session visibility" satisfied at that level). A
   user-editable device label / idle timeout would need an additive migration
@@ -144,4 +153,4 @@ Query; vitest with 1 test). Implement, committing per page:
 - Local dev: `cd backend && npm ci && npx wrangler d1 migrations apply trafficvaulthub-db --local && npm run dev` (port 8787); `cd frontend && npm ci && npm run dev`.
 
 ## Last Updated
-2026-09-22 19:10 UTC — Phase 1 Units 4 (`39433eb`) and 5 (`c1e0d8f`) complete, verified (85/85 tests, typecheck, build, secret scan) and pushed; next = Phase 1 Unit 7 (frontend auth pages + auth context + route guards)
+2026-09-23 06:30 UTC — CI secret-scan false positives fixed (`748c3f7`), GitHub Actions run green (backend/frontend/secret-scan); re-verified locally (backend 85/85, frontend 29/29, builds, scan CLEAN). Unit 7 recorded as PARTIAL (steps 1–3 done). Next = Phase 1 Unit 7 step 4 (`features/organizations/` org switcher + `useTenant`), then guards and `/app` shell.

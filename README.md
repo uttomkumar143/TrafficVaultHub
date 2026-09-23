@@ -24,7 +24,7 @@ planned unit — that file is the single source of truth for progress.
 | Coordination / cache / storage / async | Durable Objects, Cloudflare KV, Cloudflare R2, Cloudflare Queues |
 | API | REST, versioned under `/api/v1` |
 | Testing | Vitest (backend: Hono `app.request()`; frontend: jsdom + Testing Library) |
-| CI | GitHub Actions (`ci.yml`; see `.github/workflows-pending/README.md` for activation status) |
+| CI | GitHub Actions (`.github/workflows/ci.yml` — backend, frontend, secret scan; active) |
 
 ## Repository structure
 
@@ -43,7 +43,7 @@ planned unit — that file is the single source of truth for progress.
 │   ├── adr/  api/            Decision records, API docs (as they are written)
 │   └── runbooks/             Operational guides, incl. the AI build-kit guide
 ├── scripts/                  Helper scripts (secret-scan.sh)
-├── .github/workflows-pending/ CI pipeline (ci.yml) awaiting manual move to .github/workflows/
+├── .github/workflows/        CI pipeline (ci.yml: backend, frontend, secret-scan jobs)
 ├── STATE.md                  Project memory: current phase / next unit
 ├── 01-…13-*.md               AI build-kit prompt files (see docs/runbooks/ai-build-kit.md)
 └── README.md
@@ -119,13 +119,12 @@ cd backend  && npm run build   # wrangler deploy --dry-run --outdir dist (bundle
 cd frontend && npm run build   # vite build → frontend/dist
 ```
 
-CI (`ci.yml`) runs `npm ci`, `typecheck`, `test` and `build` for both
-projects plus `scripts/secret-scan.sh` on every push and pull request. It
-requires no secrets. **Activation status:** the validated file currently sits
-at `.github/workflows-pending/ci.yml` because the GitHub App token used by the
-AI build sessions may not write to `.github/workflows/`. A human must move it
-(`git mv .github/workflows-pending/ci.yml .github/workflows/ci.yml`) — see
-`.github/workflows-pending/README.md` and the blockers section of `STATE.md`.
+CI (`.github/workflows/ci.yml`) runs `npm ci`, `typecheck`, `test` and
+`build` for both projects plus `scripts/secret-scan.sh` on every push and pull
+request. It requires no secrets and is active. Test fixtures must not contain
+password/token literals of 16+ characters drawn only from `[A-Za-z0-9/+_=-]`,
+or the secret scan will flag them — use obviously synthetic values with spaces
+or dots instead.
 
 ## Deployment
 
