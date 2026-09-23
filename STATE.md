@@ -32,7 +32,7 @@ Phase 0 is COMPLETE (`2d4c17f`..`c25f376`). Phase 1 is COMPLETE (verified
 
 | Unit | Scope | Status |
 |------|-------|--------|
-| 1 | Advertiser module — `advertiser_profiles`, onboarding fields, lifecycle state machine, audited transitions, tenant routes + platform review routes | NOT STARTED |
+| 1 | Advertiser module — `advertiser_profiles`, onboarding fields, lifecycle state machine, audited transitions, tenant routes + platform review routes | PARTIAL — migration 0005 (`3b1b20a`) + state machine (`6cb294c`) done; repository/service/routes/tests remaining |
 | 2 | Affiliate module — profile, traffic-source declarations, lifecycle | NOT STARTED |
 | 3 | Offers core + lifecycle | NOT STARTED |
 | 4 | Offer versioning | NOT STARTED |
@@ -71,7 +71,9 @@ Phase 0 is COMPLETE (`2d4c17f`..`c25f376`). Phase 1 is COMPLETE (verified
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 1 Unit 9 — Phase 1 recorded complete (this commit).
+Phase 1 Unit 9 — Phase 1 recorded complete (`e808930`). Phase 2 Unit 1 in progress (see table).
+
+Master requirement map: `docs/CHECKLIST.md` (one row per prompt unit; verified statuses).
 
 ## Next Planned Unit
 Phase 2 Unit 1 — Advertiser module (PRD §16, §17, §92 `advertiser_profiles`):
@@ -97,4 +99,4 @@ reason), integration + tenant-isolation tests, ADR-003.
 - Local dev: `cd backend && npm ci && npx wrangler d1 migrations apply trafficvaulthub-db --local && npm run dev` (port 8787); `cd frontend && npm ci && npm run dev`.
 
 ## Last Updated
-2026-09-23 07:10 UTC — Phase 1 verified COMPLETE at `2c30922` (backend 88/88, frontend 42/42, builds, scan CLEAN, CI green). Next = Phase 2 Unit 1 Advertiser module.
+2026-09-23 08:35 UTC — re-verified at `6cb294c` (backend 96/96 incl. 8 state-machine tests, frontend 42/42, both typechecks, CI green). Phase 2 Unit 1 PARTIAL; next = advertiser repository/service/routes/tests.
