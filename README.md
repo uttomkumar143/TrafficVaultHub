@@ -9,10 +9,12 @@ payouts, reporting, APIs and webhooks. The complete specification is
 [`docs/PRD.md`](docs/PRD.md); a short architecture summary is in
 [`docs/architecture/overview.md`](docs/architecture/overview.md).
 
-**Project status:** Phase 1 in progress — Units 1 (auth foundation) and 2
-(session & device management) complete; API under `/api/v1/auth`. See
-[`STATE.md`](STATE.md) for the current phase, last completed unit and next
-planned unit — that file is the single source of truth for progress.
+**Project status:** Phase 0 and Phase 1 complete (auth, sessions,
+organizations, RBAC, tenant isolation, security suites); Phase 2 Unit 1
+(advertiser module) in progress. API under `/api/v1/{health,auth,organizations}`.
+See [`STATE.md`](STATE.md) for the current phase, last completed unit and next
+planned unit — that file is the single source of truth for progress; the
+per-unit requirement map is [`docs/CHECKLIST.md`](docs/CHECKLIST.md).
 
 ## Technology stack
 
@@ -101,8 +103,8 @@ numbered one (see `migrations/README.md`).
 ## Testing
 
 ```bash
-cd backend  && npm test     # Vitest: GET /api/v1/health smoke test
-cd frontend && npm test     # Vitest + jsdom: app shell / home page render test
+cd backend  && npm test     # Vitest: routes, RBAC, tenant isolation, secret exposure, lib (node:sqlite shim on real migrations)
+cd frontend && npm test     # Vitest + jsdom: auth pages, app routes, api client, auth context
 ```
 
 Typecheck:
