@@ -146,7 +146,9 @@ describe("permission resolution (user → membership → role → permissions)",
     expect((await me(owner, org.id)).permissions).toEqual(
       expect.arrayContaining(["organizations.update", "members.manage", "payouts.read", "audit.read"]),
     );
+    // VIEWER is the shared read-only tenant role (0004 + 0005 read keys).
     expect((await me(vwr, org.id)).permissions).toEqual([
+      "advertisers.read",
       "conversions.read",
       "members.read",
       "offers.read",
@@ -155,7 +157,15 @@ describe("permission resolution (user → membership → role → permissions)",
     // Network-only powers never appear on tenant roles.
     for (const token of [owner, mgr, usr, vwr]) {
       const perms = (await me(token, org.id)).permissions;
-      for (const k of ["offers.approve", "ledger.adjust", "payouts.approve", "payouts.release", "fraud.review", "compliance.resolve"]) {
+      for (const k of [
+        "offers.approve",
+        "ledger.adjust",
+        "payouts.approve",
+        "payouts.release",
+        "fraud.review",
+        "compliance.resolve",
+        "advertisers.review",
+      ]) {
         expect(perms, k).not.toContain(k);
       }
     }
