@@ -24,9 +24,10 @@ Completion           : 17 / 96 = 17.7 %
 Calculation basis: unit rows below; documentation-only rows (STATE.md units)
 count as one unit each exactly as the prompts list them.
 
-Last verified: 2026-09-23 against `main` @ `9244833` (backend 104/104 in 13
-files, frontend 42/42, both typechecks, both builds, secret scan CLEAN, CI run
-35902166461 success). Unit counts are unchanged since `6cb294c`; the 8 extra
+Last verified: 2026-09-24 against `main` @ `d416b4c` (backend 104/104 in 13
+files, frontend 42/42, both typechecks, both builds, migrations 0001–0005
+apply clean, secret scan CLEAN; last observed CI run 35902166461 on `9244833`
+success). Phase 1 re-audited unit-by-unit in that session (see its section). Unit counts are unchanged since `6cb294c`; the 8 extra
 backend tests come from the shared `lib/pagination.ts` and `lib/request-meta.ts`
 helpers (not phase units — see STATE.md).
 
@@ -89,17 +90,25 @@ Phase 0 DoD: both builds PASS · CI file valid · `/api/v1/health` works via `wr
 
 ## Phase 1 — Identity & Tenancy (`04-PHASE1-IDENTITY-TENANCY.md`) — COMPLETE 9/9
 
-| Unit | Requirement | Status | Evidence | Tests | Commits |
-|------|-------------|--------|----------|-------|---------|
-| 1.1 | Auth foundation (§12): signup, email verification, login, opaque sessions, password reset, MFA hook, `requireAuth` | COMPLETE | `modules/auth/*`, `routes/auth.ts`, ADR-001 | `auth.test.ts`, `password.test.ts` | `39c201b`..`178b931` |
-| 1.2 | Session & device management (list, revoke, revoke-others) | COMPLETE | `routes/auth.ts` sessions | `auth-sessions.test.ts` | `9c0f700` |
-| 1.3 | Organizations CRUD + membership + `audit_logs` (§7–§9) | COMPLETE | `modules/organizations/*`, `0003_organizations.sql`, ADR-002 | `organizations.test.ts` | `0d617a7`..`5930b81` |
-| 1.4 | RBAC middleware `requireOrg`/`requirePermission` (§10) | COMPLETE | `middleware/require-org.ts`, `0004_permissions.sql` | `rbac.test.ts` | `745a062`, `39433eb` |
-| 1.5 | Tenant isolation enforcement (§94, §116) | COMPLETE | `lib/tenant-scope.ts` | `tenant-isolation.test.ts`, `tenant-scope.test.ts` | `c1e0d8f` |
-| 1.6 | Migrations 0002–0004 additive | COMPLETE | `migrations/000{2,3,4}_*.sql` | shim table/catalogue asserts | — |
-| 1.7 | Frontend: auth pages, org switcher, guards, `/app` shell, members | COMPLETE | `frontend/src/features/{auth,organizations}`, `routes/` | 42 frontend tests | `69fcf51`..`c54eb3f` |
-| 1.8 | Security tests: unauthorized, expired/revoked, cross-user, cross-tenant, role escalation, secret-never-returned (§116 subset) | COMPLETE | `routes/{rbac,tenant-isolation,secret-exposure}.test.ts` | pass | `2c30922` |
-| 1.9 | STATE.md Phase 1 complete | COMPLETE | `STATE.md` | — | `e808930` |
+Re-audited 2026-09-24 at `d416b4c` against each unit's wording in `04` and the
+three DoD bullets (everything below was actually executed in that session —
+backend 104/104, frontend 42/42, both typechecks/builds, `d1 migrations apply
+--local` 0001–0005 from empty state, secret scan CLEAN, live `wrangler dev` DoD
+flow and 8-case security matrix; details in STATE.md "Phase 1 re-audit").
+
+| Unit | Requirement (from `04`) | Status | Evidence (verified) | Tests | Commits |
+|------|-------------------------|--------|---------------------|-------|---------|
+| 1.1 | Auth foundation: proven library (no hand-rolled crypto), email verification, password hashing, secure session issuance, password reset, MFA hook stub clearly marked, never fake-passing | COMPLETE | scrypt via `@noble/hashes` + Web Crypto only (`modules/auth/password.ts`, `tokens.ts`); SHA-256 digests stored, raw secrets never persisted; `mfa.ts` reports `available:false, reason:NOT_IMPLEMENTED` and throws 501 on challenge; login refuses unverified (403) — all observed live | `auth.test.ts` (16), `password.test.ts` (10) | `39c201b`..`178b931` |
+| 1.2 | Session storage choice documented in ADR; revocation; list active sessions/devices | COMPLETE | `docs/adr/ADR-001-authentication.md` §2 "D1, not KV" with rationale; `GET/DELETE /auth/sessions`, `POST /auth/sessions/revoke-others`; foreign session id → 404 | `auth-sessions.test.ts` (12) | `9c0f700` |
+| 1.3 | Organizations CRUD with `type ∈ PLATFORM\|ADVERTISER\|AFFILIATE\|PARTNER\|AGENCY`; membership table user↔org↔role | COMPLETE | `organizations.type` CHECK (0001), `organization_members` (0001), role catalogue + `role_org_types` (0003); create/list/get/patch + member add/change/remove; PLATFORM not self-creatable (400 live) | `organizations.test.ts` | `0d617a7`..`5930b81` |
+| 1.4 | Hono middleware user → membership → role → permissions, rejects out of scope; used by every protected route | COMPLETE | `middleware/require-org.ts` (`requireOrg`, `requirePermission`), grants in `0004`; `routes/organizations.ts` `use("*", requireAuth)` + `use("/:orgId"\|"/:orgId/*", requireOrg)`; every route enumerated — none bypass | `rbac.test.ts` (9) | `745a062`, `39433eb` |
+| 1.5 | Org derived from session, never client value; explicit cross-tenant rejection test | COMPLETE | `requireOrg` reads only the path param, resolved via caller's ACTIVE membership; `lib/tenant-scope.ts` branded `TenantId` + `scopedQuery`; live: body/query `organization_id` ignored, cross-tenant 404 | `tenant-isolation.test.ts` (8), `tenant-scope.test.ts` (7) | `c1e0d8f` |
+| 1.6 | `migrations/0002_identity.sql` additive; never edit `0001` | COMPLETE | `0002_identity.sql` (credentials, sessions, auth_tokens, auth_events, `users.mfa_enabled`); `0001` has one commit only; 0003/0004 also additive; all apply clean | `d1-sqlite.test.ts` table asserts | `39c201b` (0002) |
+| 1.7 | Login, signup, email verification, password reset pages; auth context/hook on TanStack Query; role-based route guards | COMPLETE | `routes/auth/{login,signup,verify-email,forgot-password,reset-password}-page.tsx`; `features/auth/auth-context.tsx` + `use-auth.ts` (TanStack Query); `components/auth/require-auth.tsx`, `require-permission.tsx` (UI-only; server authority) | `auth-pages.test.tsx` (12), `auth-context.test.tsx` (5), `app-routes.test.tsx` (13) | `69fcf51`..`c54eb3f` |
+| 1.8 | Tests: unauthorized rejected, expired session rejected, cross-tenant rejected, role escalation rejected | COMPLETE | `auth.test.ts` "rejects requests without a session" / "rejects an expired session" / "rejects a revoked session"; `rbac.test.ts` "role escalation is rejected"; `tenant-isolation.test.ts` "cross-tenant request rejected"; plus `secret-exposure.test.ts` | all pass (104/104) | `2c30922` |
+| 1.9 | STATE.md reflects Phase 1 completion and next = Phase 2 | COMPLETE | `STATE.md` Phase 1 table + re-audit block | — | `e808930`, this commit |
+
+Phase 1 DoD: (1) sign up → verify → log in → session scoped to org + role — executed live; (2) every protected route passes `requireAuth`→`requireOrg`→`requirePermission` — enumerated, no exceptions; (3) cross-tenant and role-escalation tests exist and pass. **All satisfied.**
 
 ## Phase 2 — Advertisers, Affiliates, Offers & Marketplace (`05-PHASE2-OFFERS-MARKETPLACE.md`) — 0/10
 
