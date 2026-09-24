@@ -37,7 +37,9 @@ Every unit re-checked from the repository (not from this file), sandbox Node 22.
 - **DoD bullet 2**: every `:orgId` route in `routes/organizations.ts` sits behind `use("*", requireAuth)` + `use("/:orgId"|"/:orgId/*", requireOrg)` + per-route `requirePermission` (only `/:orgId/me` is member-only by design); all mutating `/auth/*` routes carry `requireAuth`; public auth routes are exactly signup/verify/resend/login/forgot/reset. No 501/TODO/bypass in non-test src (MFA stub throws NOT_IMPLEMENTED, never passes).
 - **DoD bullet 3**: `routes/auth.test.ts` (unauthorized 401, expired 401, revoked 401, inactive user 401), `routes/rbac.test.ts` (role escalation 403; body `organization_id` ignored; REMOVED membership 404), `routes/tenant-isolation.test.ts` (cross-tenant read/mutate 404, member ids not addressable across tenants, body/query smuggling ignored, PLATFORM self-create 400) — all pass.
 - **Live security matrix (8/8 denied correctly)**: own-tenant read 200 · cross-tenant read/PATCH/members 404 ORGANIZATION_NOT_FOUND · unauthenticated 401 · garbage bearer 401 · body `organization_id` smuggling ignored (path tenant acted on, other tenant unchanged) · query-string `organization_id` ignored · foreign member id under own path 404 MEMBER_NOT_FOUND · VIEWER PATCH org / add owner / self-promote 403 FORBIDDEN · PLATFORM org self-create 400 · removed member → 404 on `/me` · path variants (trailing slash, case, `//`, `..`) 404 · logout then reuse 401.
-- CI `.github/workflows/ci.yml` ACTIVE; last observed run 35902166461 (on `9244833`) success. No code changed in this audit.
+- **Recovery re-run (same session, after a hung frontend vitest worker was killed)**: every command above re-executed with hard timeouts — identical results (104/104, 42/42, typechecks, builds, migrations, secret scan CLEAN). Extra live proofs added: DB-level **expired session** (`UPDATE sessions SET expires_at='2000-01-01…'`) → 401 on `/auth/me` and `/organizations`; `revoke-others` → the other session's next request 401; VIEWER demote-owner / remove-owner 403; PLATFORM role key (`SUPER_ADMIN`) in an ADVERTISER org → 400 `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`; `/auth/sessions` body contains no `token_hash`/`password`/`revoked*` fields. Second tenant seated as `ADVERTISER_OWNER`; first as `AFFILIATE_OWNER` — owner role follows org type.
+- Note for future sessions: `npm test` in `frontend/` can leave a vitest worker hanging in this sandbox after all 42 tests pass; run `CI=true timeout 300 npx vitest run --no-file-parallelism` (exits cleanly).
+- CI `.github/workflows/ci.yml` ACTIVE; run 36027269698 on `7975776` (this audit's commit) = success. No code changed in this audit.
 
 ## Phase 2 — unit status
 
@@ -186,9 +188,10 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-09-24 16:30 UTC — 04 Phase 1 audit session at `d416b4c`: all 9 units
-re-verified against the actual 04 DoD, including a live `wrangler dev`
-signup→verify→login→org→`/me` flow and an 8-case cross-tenant / role-escalation
-matrix; backend 104/104, frontend 42/42, both typechecks, both builds,
-migrations 0001–0005 apply clean, secret scan CLEAN. No source code changed;
-no Phase 2+ work started.
+2026-09-24 16:45 UTC — 04 Phase 1 audit session (audit commit `7975776`,
+recovery re-run after a hung frontend vitest worker): all 9 units re-verified
+against the actual 04 DoD, including a live `wrangler dev`
+signup→verify→login→org→`/me` flow and the full cross-tenant / role-escalation /
+expired-session matrix; backend 104/104, frontend 42/42, both typechecks, both
+builds, migrations 0001–0005 apply clean, secret scan CLEAN, CI run 36027269698
+success. No source code changed; no Phase 2+ work started.

@@ -26,8 +26,10 @@ count as one unit each exactly as the prompts list them.
 
 Last verified: 2026-09-24 against `main` @ `d416b4c` (backend 104/104 in 13
 files, frontend 42/42, both typechecks, both builds, migrations 0001–0005
-apply clean, secret scan CLEAN; last observed CI run 35902166461 on `9244833`
-success). Phase 1 re-audited unit-by-unit in that session (see its section). Unit counts are unchanged since `6cb294c`; the 8 extra
+apply clean, secret scan CLEAN; CI run 36027269698 on the audit commit
+`7975776` success). Phase 1 re-audited unit-by-unit in that session (see its
+section); the verification was re-executed once more after a sandbox test-runner
+hang, with identical results. Unit counts are unchanged since `6cb294c`; the 8 extra
 backend tests come from the shared `lib/pagination.ts` and `lib/request-meta.ts`
 helpers (not phase units — see STATE.md).
 
