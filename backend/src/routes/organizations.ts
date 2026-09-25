@@ -16,6 +16,10 @@
  * POST   /:orgId/members                  → 201 { member }         members.manage; owner role required to grant an owner seat
  * PATCH  /:orgId/members/:memberId        → 200 { member }         members.manage; owner role required to touch an owner seat; LAST_OWNER guard
  * DELETE /:orgId/members/:memberId        → 204                    members.manage; owner role required to remove an owner; LAST_OWNER + SELF_MODIFICATION guards
+ *
+ * Sub-modules mounted under `/:orgId` (inherit requireAuth + requireOrg):
+ *   /:orgId/advertiser(/*)              → routes/advertisers.ts  advertiserRoutes        (Phase 2 Unit 1, tenant)
+ *   /:orgId/platform/advertisers(/*)    → routes/advertisers.ts  advertiserReviewRoutes  (Phase 2 Unit 1, PLATFORM org)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -26,6 +30,7 @@ import { parseJsonBody } from "../lib/validation";
 import { requireAuth } from "../middleware/require-auth";
 import { requireOrg, requirePermission } from "../middleware/require-org";
 import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
+import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
 
 const nameSchema = z.string().trim().min(2).max(120);
 const slugSchema = z
@@ -65,6 +70,10 @@ organizationRoutes.use("*", requireAuth);
 // Every tenant-scoped route resolves RBAC + tenant scope before its handler.
 organizationRoutes.use("/:orgId", requireOrg);
 organizationRoutes.use("/:orgId/*", requireOrg);
+
+// Phase 2 sub-modules (each route adds its own requirePermission).
+organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
+organizationRoutes.route("/:orgId/platform/advertisers", advertiserReviewRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);

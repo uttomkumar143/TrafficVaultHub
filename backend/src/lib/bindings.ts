@@ -3,6 +3,7 @@
  * Mirrors `wrangler.jsonc`. Keep in sync when bindings change.
  */
 import type { TenantContext } from "../middleware/require-org";
+import type { AdvertiserService } from "../modules/advertisers/service";
 import type { AuthService, AuthenticatedContext } from "../modules/auth/service";
 import type { OrganizationService } from "../modules/organizations/service";
 
@@ -27,6 +28,8 @@ export interface Bindings {
 export interface Variables {
   authService: AuthService;
   organizationService: OrganizationService;
+  /** Phase 2 Unit 1 — advertiser profile + lifecycle. */
+  advertiserService: AdvertiserService;
   /** Present only after `requireAuth` has run. */
   auth: AuthenticatedContext;
   /** Present only after `requireOrg` has run (RBAC + tenant scope, Unit 4). */

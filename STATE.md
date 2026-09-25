@@ -45,7 +45,7 @@ Every unit re-checked from the repository (not from this file), sandbox Node 22.
 
 | Unit | Scope | Status |
 |------|-------|--------|
-| 1 | Advertiser module — `advertiser_profiles`, onboarding fields, lifecycle state machine, audited transitions, tenant routes + platform review routes | PARTIAL — migration 0005 (`3b1b20a`) + state machine (`6cb294c`) done; repository/service/routes/tests remaining |
+| 1 | Advertiser module — `advertiser_profiles`, onboarding fields, lifecycle state machine, audited transitions, tenant routes + platform review routes | COMPLETE — 0005 (`3b1b20a`), state machine (`6cb294c`), repository/service/routes + `test/fixtures.ts` + 9 route tests (this session) |
 | 2 | Affiliate module — profile, traffic-source declarations, lifecycle | NOT STARTED |
 | 3 | Offers core + lifecycle | NOT STARTED |
 | 4 | Offer versioning | NOT STARTED |
@@ -97,22 +97,16 @@ Every unit re-checked from the repository (not from this file), sandbox Node 22.
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Docs-only: Phase 1 re-audited against `04-PHASE1-IDENTITY-TENANCY.md` (9/9
-COMPLETE, DoD executed live, 8-case security matrix, no gaps, no duplicates,
-no code changed). Last code unit: Phase 2 Unit 1 partial (`6cb294c`) + shared libs (`ae79927`).
-
-Master requirement map: `docs/CHECKLIST.md` (one row per prompt unit; verified statuses).
+Phase 2 Unit 1 (Advertiser module) COMPLETE: `modules/advertisers/{repository,service}.ts`,
+`routes/advertisers.ts` (tenant `/:orgId/advertiser*`, platform `/:orgId/platform/advertisers*`),
+wired in `app.ts`/`bindings.ts`/`routes/organizations.ts`; shared `test/fixtures.ts`
+(`TestHarness`, `platformOrg()` seeds PLATFORM org + platform-role seat). Backend 113/113.
 
 ## Next Planned Unit
-WAITING for the next phase instruction (hard stop after the 04 Phase 1 audit
-session; Phase 2 must not be started without an explicit prompt).
-When phase work resumes, the exact next unit is Phase 2 Unit 1 (continued) —
-Advertiser module (PRD §16, §17, §92): `modules/advertisers/repository.ts`
-(TenantId + `scopedQuery`), then `service.ts`, tenant routes
-`/api/v1/organizations/:orgId/advertiser` (get/upsert/submit), platform review
-routes `/api/v1/platform/:orgId/advertisers` (cursor list, get, transition with
-reason), integration + tenant-isolation tests, ADR-003. Migration `0005` and
-`state-machine.ts` already exist — do not recreate them.
+Phase 2 Unit 2 — Affiliate module: migration `0006_affiliates.sql`
+(`affiliate_profiles`, `affiliate_traffic_sources`, `affiliate_status_transitions`,
+`affiliates.read/manage/review` keys), `modules/affiliates/{state-machine,repository,service}.ts`,
+`routes/affiliates.ts`, tests.
 
 ## Open Questions / Blockers
 - Device metadata limited to `ip_address` + `user_agent` (PRD §12 satisfied at that level).
