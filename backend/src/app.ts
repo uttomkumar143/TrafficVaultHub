@@ -3,6 +3,8 @@ import type { AppEnv } from "./lib/bindings";
 import { AppError, errorResponse } from "./lib/errors";
 import { AdvertiserRepository } from "./modules/advertisers/repository";
 import { AdvertiserService } from "./modules/advertisers/service";
+import { AffiliateRepository } from "./modules/affiliates/repository";
+import { AffiliateService } from "./modules/affiliates/service";
 import { LogEmailSender, type EmailSender } from "./modules/auth/email";
 import { AuthRepository } from "./modules/auth/repository";
 import { AuthService } from "./modules/auth/service";
@@ -63,6 +65,7 @@ export function createApp(options: CreateAppOptions = {}) {
     );
     c.set("organizationService", new OrganizationService(new OrganizationRepository(c.env.DB), c.env.DB));
     c.set("advertiserService", new AdvertiserService(new AdvertiserRepository(c.env.DB), c.env.DB));
+    c.set("affiliateService", new AffiliateService(new AffiliateRepository(c.env.DB), c.env.DB));
     await next();
   };
   app.use("/api/v1/auth/*", wireServices);

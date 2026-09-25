@@ -20,6 +20,8 @@
  * Sub-modules mounted under `/:orgId` (inherit requireAuth + requireOrg):
  *   /:orgId/advertiser(/*)              → routes/advertisers.ts  advertiserRoutes        (Phase 2 Unit 1, tenant)
  *   /:orgId/platform/advertisers(/*)    → routes/advertisers.ts  advertiserReviewRoutes  (Phase 2 Unit 1, PLATFORM org)
+ *   /:orgId/affiliate(/*)               → routes/affiliates.ts   affiliateRoutes         (Phase 2 Unit 2, tenant)
+ *   /:orgId/platform/affiliates(/*)     → routes/affiliates.ts   affiliateReviewRoutes   (Phase 2 Unit 2, PLATFORM org)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -31,6 +33,7 @@ import { requireAuth } from "../middleware/require-auth";
 import { requireOrg, requirePermission } from "../middleware/require-org";
 import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
 import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
+import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
 
 const nameSchema = z.string().trim().min(2).max(120);
 const slugSchema = z
@@ -74,6 +77,8 @@ organizationRoutes.use("/:orgId/*", requireOrg);
 // Phase 2 sub-modules (each route adds its own requirePermission).
 organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
 organizationRoutes.route("/:orgId/platform/advertisers", advertiserReviewRoutes);
+organizationRoutes.route("/:orgId/affiliate", affiliateRoutes);
+organizationRoutes.route("/:orgId/platform/affiliates", affiliateReviewRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);

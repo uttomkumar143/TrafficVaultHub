@@ -4,6 +4,7 @@
  */
 import type { TenantContext } from "../middleware/require-org";
 import type { AdvertiserService } from "../modules/advertisers/service";
+import type { AffiliateService } from "../modules/affiliates/service";
 import type { AuthService, AuthenticatedContext } from "../modules/auth/service";
 import type { OrganizationService } from "../modules/organizations/service";
 
@@ -30,6 +31,8 @@ export interface Variables {
   organizationService: OrganizationService;
   /** Phase 2 Unit 1 — advertiser profile + lifecycle. */
   advertiserService: AdvertiserService;
+  /** Phase 2 Unit 2 — affiliate profile, traffic sources + lifecycle. */
+  affiliateService: AffiliateService;
   /** Present only after `requireAuth` has run. */
   auth: AuthenticatedContext;
   /** Present only after `requireOrg` has run (RBAC + tenant scope, Unit 4). */
