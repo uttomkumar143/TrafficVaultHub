@@ -22,6 +22,9 @@
  *   /:orgId/platform/advertisers(/*)    → routes/advertisers.ts  advertiserReviewRoutes  (Phase 2 Unit 1, PLATFORM org)
  *   /:orgId/affiliate(/*)               → routes/affiliates.ts   affiliateRoutes         (Phase 2 Unit 2, tenant)
  *   /:orgId/platform/affiliates(/*)     → routes/affiliates.ts   affiliateReviewRoutes   (Phase 2 Unit 2, PLATFORM org)
+ *   /:orgId/offers(/*)                  → routes/offers.ts       offerRoutes             (Phase 2 Units 3–6, tenant)
+ *   /:orgId/marketplace(/*)             → routes/offers.ts       marketplaceRoutes       (Phase 2 Unit 7, affiliate)
+ *   /:orgId/platform/offers(/*)         → routes/offers.ts       offerReviewRoutes       (Phase 2 Unit 3, PLATFORM org)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -34,6 +37,7 @@ import { requireOrg, requirePermission } from "../middleware/require-org";
 import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
 import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
 import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
+import { marketplaceRoutes, offerReviewRoutes, offerRoutes } from "./offers";
 
 const nameSchema = z.string().trim().min(2).max(120);
 const slugSchema = z
@@ -79,6 +83,9 @@ organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
 organizationRoutes.route("/:orgId/platform/advertisers", advertiserReviewRoutes);
 organizationRoutes.route("/:orgId/affiliate", affiliateRoutes);
 organizationRoutes.route("/:orgId/platform/affiliates", affiliateReviewRoutes);
+organizationRoutes.route("/:orgId/offers", offerRoutes);
+organizationRoutes.route("/:orgId/marketplace", marketplaceRoutes);
+organizationRoutes.route("/:orgId/platform/offers", offerReviewRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);

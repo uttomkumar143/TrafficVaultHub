@@ -45,16 +45,27 @@ Every unit re-checked from the repository (not from this file), sandbox Node 22.
 
 | Unit | Scope | Status |
 |------|-------|--------|
-| 1 | Advertiser module — `advertiser_profiles`, onboarding fields, lifecycle state machine, audited transitions, tenant routes + platform review routes | COMPLETE — 0005 (`3b1b20a`), state machine (`6cb294c`), repository/service/routes + `test/fixtures.ts` + 9 route tests (this session) |
-| 2 | Affiliate module — profile, traffic-source declarations, lifecycle | NOT STARTED |
-| 3 | Offers core + lifecycle | NOT STARTED |
-| 4 | Offer versioning | NOT STARTED |
-| 5 | Offer economics (`amount_minor` + `currency`) | NOT STARTED |
-| 6 | Offer access & targeting | NOT STARTED |
-| 7 | Marketplace API + UI | NOT STARTED |
-| 8 | Migration(s) — next file is `0005_…` (0003/0004 already used by identity; PRD §109 numbering is illustrative) | NOT STARTED |
-| 9 | Tests (version immutability, access modes, cross-tenant marketplace) | NOT STARTED |
-| 10 | STATE.md | NOT STARTED |
+| 1 | Advertiser module — `advertiser_profiles`, onboarding fields, lifecycle state machine, audited transitions, tenant routes + platform review routes | COMPLETE — 0005 (`3b1b20a`), state machine (`6cb294c`), repository/service/routes + `test/fixtures.ts` + 9 route tests |
+| 2 | Affiliate module — profile, traffic-source declarations, lifecycle | COMPLETE — 0006, `modules/affiliates/{state-machine,repository,service}.ts`, `routes/affiliates.ts`, tests |
+| 3 | Offers core + lifecycle | COMPLETE — 0007, `modules/offers/{state-machine,repository,service}.ts`, `routes/offers.ts`; DRAFT→SUBMITTED→UNDER_REVIEW→APPROVED→LIVE + PAUSED/holds, server-side, no advertiser self-approval |
+| 4 | Offer versioning | COMPLETE — immutable `offer_versions` (INSERT-only), `createVersion` (MAX+1), version history queryable, current pointer moves |
+| 5 | Offer economics (`amount_minor` + `currency`) | COMPLETE — integer minor units + 3-letter currency at every boundary; `validateEconomics` (commission ≤ payout, REVSHARE bps 1..10000); float rejected by zod |
+| 6 | Offer access & targeting | COMPLETE — `affiliate_offer_access` (INVITED/REQUESTED/APPROVED/REJECTED/REVOKED), `offer_version_targeting` allow-list; access modes enforced server-side (repo WHERE + service) |
+| 7 | Marketplace API + UI | API COMPLETE — `marketplaceRoutes` (search/detail/apply), confidential-safe `PublicMarketplaceOffer` (payout/margin/budget never selected); **frontend UI NOT STARTED** (cannot `npm ci`/build/test frontend in this sandbox — see blocker) |
+| 8 | Migration(s) | COMPLETE — `0007_offers.sql` (additive: offers, offer_versions, offer_version_targeting, affiliate_offer_access, offer_status_transitions) |
+| 9 | Tests (version immutability, access modes, cross-tenant marketplace) | COMPLETE — `src/test/offers.test.ts` (15 tests): version-1 immutability + pointer move, integer economics + rejections, full lifecycle + no self-approval, marketplace confidentiality (no economics leak), PRIVATE/APPLICATION_REQUIRED access enforcement, cross-tenant + cross-affiliate isolation |
+| 10 | STATE.md | COMPLETE — this update |
+
+### Phase 2 verification — 2026-09-25
+Run in the Linux sandbox where **vitest itself cannot start** (its `rolldown` needs a
+native binding absent from the Windows-only `node_modules`; npm registry is 403-blocked
+so nothing can be installed). The suite is pure-JS + built-in `node:sqlite`, so it was run
+faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
+- backend tests: **149/149** pass, 41 suites (was 134/37; +15 offers tests). Command:
+  `node --test --experimental-transform-types --experimental-sqlite --import <harness>/register.mjs 'src/**/*.test.ts'`.
+- `tsc --noEmit` (app) exit 0 · `tsc --noEmit -p tsconfig.test.json` exit 0.
+- NOT verified: vitest itself, `npm run build`, frontend (all blocked by the sandbox
+  npm/native-binding block); `git push` / `HEAD==origin/main` blocked (proxy 403 on GitHub).
 
 ### Shared library units landed after `6cb294c` (not tied to a phase unit)
 - `993e577` (+ fixes `da395af`, `e16adcc`): `lib/pagination.ts` — opaque base64url
@@ -97,16 +108,21 @@ Every unit re-checked from the repository (not from this file), sandbox Node 22.
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 2 Unit 1 (Advertiser module) COMPLETE: `modules/advertisers/{repository,service}.ts`,
-`routes/advertisers.ts` (tenant `/:orgId/advertiser*`, platform `/:orgId/platform/advertisers*`),
-wired in `app.ts`/`bindings.ts`/`routes/organizations.ts`; shared `test/fixtures.ts`
-(`TestHarness`, `platformOrg()` seeds PLATFORM org + platform-role seat). Backend 113/113.
+Phase 2 Unit 9 (Offer behavioral tests) COMPLETE: `backend/src/test/offers.test.ts`
+(15 tests across 4 suites) — version-1 immutability + current-pointer move, integer
+`amount_minor`/currency economics with float/commission/REVSHARE rejections, full
+review lifecycle with no advertiser self-approval, marketplace confidentiality (advertiser
+payout/margin/budget never exposed to affiliates), PRIVATE + APPLICATION_REQUIRED access
+enforced server-side, and cross-tenant + cross-affiliate isolation. Backend 149/149,
+both tsc typechecks exit 0 (via node:test harness — vitest can't run in this sandbox).
 
 ## Next Planned Unit
-Phase 2 Unit 2 — Affiliate module: migration `0006_affiliates.sql`
-(`affiliate_profiles`, `affiliate_traffic_sources`, `affiliate_status_transitions`,
-`affiliates.read/manage/review` keys), `modules/affiliates/{state-machine,repository,service}.ts`,
-`routes/affiliates.ts`, tests.
+Phase 2 backend is engineering-complete (Units 1–6, 8, 9 COMPLETE; Unit 7 API complete,
+frontend marketplace UI outstanding). Remaining before Phase 2 can be declared 100%:
+(1) frontend marketplace UI (Unit 7) — blocked in this sandbox (no frontend toolchain);
+(2) commit + `git push origin main` so `HEAD==origin/main` — blocked (GitHub proxy 403).
+Resume when npm registry + GitHub are reachable: `npm ci` both sides, run vitest + builds
+for real, build the marketplace UI, then commit/push. Do NOT start Phase 3.
 
 ## Open Questions / Blockers
 - Device metadata limited to `ip_address` + `user_agent` (PRD §12 satisfied at that level).
@@ -182,10 +198,9 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-09-24 16:45 UTC — 04 Phase 1 audit session (audit commit `7975776`,
-recovery re-run after a hung frontend vitest worker): all 9 units re-verified
-against the actual 04 DoD, including a live `wrangler dev`
-signup→verify→login→org→`/me` flow and the full cross-tenant / role-escalation /
-expired-session matrix; backend 104/104, frontend 42/42, both typechecks, both
-builds, migrations 0001–0005 apply clean, secret scan CLEAN, CI run 36027269698
-success. No source code changed; no Phase 2+ work started.
+2026-09-25 — Phase 2 offers/marketplace session. Added `backend/src/test/offers.test.ts`
+(Unit 9, 15 tests) and fixed one test bug (unwrap `{version}` envelope). Backend suite
+149/149 via node:test harness, both tsc typechecks exit 0. Phase 2 unit table refreshed
+from actual repo state (Units 1–6, 8, 9 COMPLETE; Unit 7 API complete + frontend UI
+outstanding). No source code changed; only the test file added. Not verified in-sandbox:
+vitest itself, frontend, builds; `git push`/`HEAD==origin/main` blocked by proxy 403.

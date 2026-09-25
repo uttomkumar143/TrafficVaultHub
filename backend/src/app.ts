@@ -8,6 +8,8 @@ import { AffiliateService } from "./modules/affiliates/service";
 import { LogEmailSender, type EmailSender } from "./modules/auth/email";
 import { AuthRepository } from "./modules/auth/repository";
 import { AuthService } from "./modules/auth/service";
+import { OfferRepository } from "./modules/offers/repository";
+import { OfferService } from "./modules/offers/service";
 import { OrganizationRepository } from "./modules/organizations/repository";
 import { OrganizationService } from "./modules/organizations/service";
 import { authRoutes } from "./routes/auth";
@@ -66,6 +68,10 @@ export function createApp(options: CreateAppOptions = {}) {
     c.set("organizationService", new OrganizationService(new OrganizationRepository(c.env.DB), c.env.DB));
     c.set("advertiserService", new AdvertiserService(new AdvertiserRepository(c.env.DB), c.env.DB));
     c.set("affiliateService", new AffiliateService(new AffiliateRepository(c.env.DB), c.env.DB));
+    c.set(
+      "offerService",
+      new OfferService(new OfferRepository(c.env.DB), new AdvertiserRepository(c.env.DB), c.env.DB),
+    );
     await next();
   };
   app.use("/api/v1/auth/*", wireServices);
