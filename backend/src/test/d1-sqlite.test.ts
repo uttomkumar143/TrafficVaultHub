@@ -13,6 +13,9 @@ describe("test D1 shim", () => {
     expect(rows.results.map((r) => r.name)).toEqual([
       "advertiser_profiles",
       "advertiser_status_transitions",
+      "affiliate_profiles",
+      "affiliate_status_transitions",
+      "affiliate_traffic_sources",
       "audit_logs",
       "auth_events",
       "auth_tokens",
@@ -79,6 +82,9 @@ describe("test D1 shim", () => {
       "advertisers.manage",
       "advertisers.read",
       "advertisers.review",
+      "affiliates.manage",
+      "affiliates.read",
+      "affiliates.review",
       "audit.read",
       "compliance.read",
       "compliance.resolve",
@@ -124,6 +130,7 @@ describe("test D1 shim", () => {
     }
     expect(byRole.get("VIEWER")).toEqual([
       "advertisers.read",
+      "affiliates.read",
       "conversions.read",
       "members.read",
       "offers.read",
@@ -134,6 +141,14 @@ describe("test D1 shim", () => {
     expect(byRole.get("ADVERTISER_OWNER")).toEqual(expect.arrayContaining(["advertisers.read", "advertisers.manage"]));
     expect(byRole.get("AFFILIATE_OWNER")).not.toEqual(expect.arrayContaining(["advertisers.manage"]));
 
+    // 0006: affiliate tenant roles manage their own profile; advertiser roles hold no affiliates.* key.
+    expect(byRole.get("AFFILIATE_OWNER")).toEqual(expect.arrayContaining(["affiliates.read", "affiliates.manage"]));
+    expect(byRole.get("AFFILIATE_MANAGER")).toEqual(expect.arrayContaining(["affiliates.read", "affiliates.manage"]));
+    expect(byRole.get("AFFILIATE_USER")).toEqual(expect.arrayContaining(["affiliates.read"]));
+    expect(byRole.get("AFFILIATE_USER")).not.toEqual(expect.arrayContaining(["affiliates.manage"]));
+    expect(byRole.get("ADVERTISER_OWNER")!.filter((k) => k.startsWith("affiliates."))).toEqual([]);
+    expect(byRole.get("OPERATIONS_ADMIN")).toEqual(expect.arrayContaining(["affiliates.review"]));
+
     // Network-only powers never reach tenant roles (PRD §11 separation of duties).
     const networkOnly = [
       "offers.approve",
@@ -143,6 +158,7 @@ describe("test D1 shim", () => {
       "compliance.resolve",
       "fraud.review",
       "advertisers.review",
+      "affiliates.review",
     ];
     for (const [role, keys] of byRole) {
       if (["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_MANAGER", "COMPLIANCE_MANAGER"].includes(role)) continue;
