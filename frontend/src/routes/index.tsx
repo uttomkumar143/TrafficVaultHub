@@ -13,6 +13,11 @@ import { AppIndexPage } from "@/routes/app/app-index-page";
 import { CreateOrganizationPage } from "@/routes/app/create-organization-page";
 import { OrganizationOverviewPage } from "@/routes/app/organization-overview-page";
 import { MembersPage } from "@/routes/app/members-page";
+import { OffersPage } from "@/routes/app/offers-page";
+import { CreateOfferPage } from "@/routes/app/create-offer-page";
+import { OfferDetailPage } from "@/routes/app/offer-detail-page";
+import { MarketplacePage } from "@/routes/app/marketplace-page";
+import { MarketplaceOfferPage } from "@/routes/app/marketplace-offer-page";
 
 /** Route table. Additional feature routes are registered here in later phases. */
 export const routes: RouteObject[] = [
@@ -45,6 +50,13 @@ export const routes: RouteObject[] = [
       { path: "organizations/new", element: <CreateOrganizationPage /> },
       { path: ":orgId", element: <OrganizationOverviewPage /> },
       { path: ":orgId/members", element: <MembersPage /> },
+      // Phase 2 — advertiser/agency offer management (offers.read/create/update/pause)
+      { path: ":orgId/offers", element: <OffersPage /> },
+      { path: ":orgId/offers/new", element: <CreateOfferPage /> },
+      { path: ":orgId/offers/:offerId", element: <OfferDetailPage /> },
+      // Phase 2 — affiliate/partner marketplace (offers.read; confidential-safe projection)
+      { path: ":orgId/marketplace", element: <MarketplacePage /> },
+      { path: ":orgId/marketplace/:offerId", element: <MarketplaceOfferPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

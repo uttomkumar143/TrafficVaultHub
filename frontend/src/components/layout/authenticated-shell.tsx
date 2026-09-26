@@ -2,14 +2,32 @@ import { Link, NavLink, Outlet, useNavigate, useParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/use-auth";
 import { OrganizationSwitcher } from "@/features/organizations/organization-switcher";
+import { useTenant } from "@/features/organizations/hooks";
 import { cn } from "@/lib/utils";
+import type { OrganizationType } from "@/types/api";
+
+/**
+ * Mirrors `OFFER_ORG_TYPES` / `AFFILIATE_ORG_TYPES` in
+ * backend/src/modules/offers/service.ts. UI-gating only — the server rejects
+ * ORG_TYPE_NOT_ADVERTISER / AFFILIATE_ORG_INVALID regardless of what is shown.
+ */
+const OFFER_OWNER_ORG_TYPES: readonly OrganizationType[] = ["ADVERTISER", "AGENCY"];
+const MARKETPLACE_ORG_TYPES: readonly OrganizationType[] = ["AFFILIATE", "PARTNER"];
+
+interface NavSection {
+  to: string;
+  label: string;
+  end: boolean;
+}
 
 /**
  * Authenticated product shell mounted under `/app` (inside `<RequireAuth>`).
  * Header: brand, organization switcher, signed-in email, sign out.
  * Sidebar: sections for the current organization (only when one is selected).
  *
- * Only the identity/organization sections exist in Phase 1; the role-specific
+ * Phase 1 provides the identity/organization sections. Phase 2 adds
+ * "Offers" (ADVERTISER/AGENCY) or "Marketplace" (AFFILIATE/PARTNER), both
+ * gated on `offers.read` from `GET /organizations/:orgId/me`. The role-specific
  * dashboards of PRD §86–90 are added by Phase 7 and must never show
  * fabricated numbers before their backends exist.
  */
@@ -17,13 +35,22 @@ export function AuthenticatedShell() {
   const auth = useAuth();
   const navigate = useNavigate();
   const { orgId } = useParams<{ orgId: string }>();
+  const tenant = useTenant(orgId);
 
-  const sections = orgId
-    ? [
-        { to: `/app/${orgId}`, label: "Overview", end: true },
-        { to: `/app/${orgId}/members`, label: "Members", end: false },
-      ]
-    : [];
+  const sections: NavSection[] = [];
+  if (orgId) {
+    sections.push({ to: `/app/${orgId}`, label: "Overview", end: true });
+    sections.push({ to: `/app/${orgId}/members`, label: "Members", end: false });
+
+    const orgType = tenant.tenant?.organization.type;
+    if (orgType && tenant.can("offers.read")) {
+      if (OFFER_OWNER_ORG_TYPES.includes(orgType)) {
+        sections.push({ to: `/app/${orgId}/offers`, label: "Offers", end: false });
+      } else if (MARKETPLACE_ORG_TYPES.includes(orgType)) {
+        sections.push({ to: `/app/${orgId}/marketplace`, label: "Marketplace", end: false });
+      }
+    }
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
