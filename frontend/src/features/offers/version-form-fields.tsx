@@ -53,7 +53,8 @@ export function VersionFormFields<T extends FieldValues>({ form, prefix, disable
   const payoutType = form.watch(name("payout_type")) as VersionFormValues["payout_type"] | undefined;
   const currency = ((form.watch(name("currency")) as string | undefined) ?? "").toUpperCase() || "USD";
   const payoutTypeId = `${baseId}-payout-type`;
-  const targetingId = `${baseId}-targeting`;
+  // Distinct from the `${baseId}-targeting` heading id used by aria-labelledby below.
+  const targetingId = `${baseId}-targeting-lines`;
   const changeSummaryId = `${baseId}-change-summary`;
 
   const selectError = errorFor("payout_type");
