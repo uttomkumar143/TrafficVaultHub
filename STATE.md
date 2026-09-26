@@ -4,6 +4,8 @@
 
 ## Current Phase
 Phase 2 — Advertisers, Affiliates, Offers & Marketplace (`05-PHASE2-OFFERS-MARKETPLACE.md`)
+— **all 10 units COMPLETE as of `d73756b` (2026-09-26)**; see "Phase 2 — unit status" and
+"Phase 2 verification — 2026-09-26" below. Awaiting the Phase 3 instruction; do not start it automatically.
 
 Phase 0 is COMPLETE (`2d4c17f`..`c25f376`; CI activated later at `22b13e9`,
 green since `748c3f7`) — re-audited unit-by-unit against `03-PHASE0-BOOTSTRAP.md`
@@ -51,12 +53,26 @@ Every unit re-checked from the repository (not from this file), sandbox Node 22.
 | 4 | Offer versioning | COMPLETE — immutable `offer_versions` (INSERT-only), `createVersion` (MAX+1), version history queryable, current pointer moves |
 | 5 | Offer economics (`amount_minor` + `currency`) | COMPLETE — integer minor units + 3-letter currency at every boundary; `validateEconomics` (commission ≤ payout, REVSHARE bps 1..10000); float rejected by zod |
 | 6 | Offer access & targeting | COMPLETE — `affiliate_offer_access` (INVITED/REQUESTED/APPROVED/REJECTED/REVOKED), `offer_version_targeting` allow-list; access modes enforced server-side (repo WHERE + service) |
-| 7 | Marketplace API + UI | API COMPLETE — `marketplaceRoutes` (search/detail/apply), confidential-safe `PublicMarketplaceOffer` (payout/margin/budget never selected); **frontend UI NOT STARTED** (cannot `npm ci`/build/test frontend in this sandbox — see blocker) |
+| 7 | Marketplace API + UI | COMPLETE — API: `marketplaceRoutes` (search w/ 8 filters incl. `min_commission_minor` + status narrowing, detail, apply), confidential-safe `PublicMarketplaceOffer` (payout/margin/budget never selected). Frontend (`daa8675`..`d73756b`): `types/api.ts` catalogues, `features/offers/{api,hooks,schemas,presentation,version-form-fields}`, `lib/money.ts` (string-math minor↔major, no floats); advertiser pages `offers-page`, `create-offer-page`, `offer-detail-page` (lifecycle FROM `allowed_transitions`, reason for §124 targets, immutable new-version form, access grants, histories); affiliate pages `marketplace-page` (all 8 filters in URL, cursor Load more, confidential-safe cards), `marketplace-offer-page` (AccessPanel per server `can_join/can_apply/my_access`); routes + nav in `routes/index.tsx` / `authenticated-shell.tsx` (`31ec8df`). Route tests: `offers-routes` 9, `offer-detail-routes` 24, `marketplace-routes` 18 (+ 11 unit tests money/schemas) |
 | 8 | Migration(s) | COMPLETE — `0007_offers.sql` (additive: offers, offer_versions, offer_version_targeting, affiliate_offer_access, offer_status_transitions) |
 | 9 | Tests (version immutability, access modes, cross-tenant marketplace) | COMPLETE — `src/test/offers.test.ts` (15 tests): version-1 immutability + pointer move, integer economics + rejections, full lifecycle + no self-approval, marketplace confidentiality (no economics leak), PRIVATE/APPLICATION_REQUIRED access enforcement, cross-tenant + cross-affiliate isolation |
 | 10 | STATE.md | COMPLETE — this update |
 
-### Phase 2 verification — 2026-09-25
+### Phase 2 verification — 2026-09-26 (Session 6, real toolchain)
+npm registry AND GitHub reachable this session; fresh `npm ci` both sides (Node 22.23.2 / npm 10.9.8):
+- backend: `npm run typecheck` PASS · **vitest 153/153** (17 files) PASS — first time the backend
+  suite ran under vitest itself since the offers/affiliates units landed (previous sessions used
+  the node:test harness, which reported 149; the 4 extra are the `6dfb4fa` marketplace filter suites).
+- frontend: `npm run typecheck` PASS · **vitest 104/104** (10 files) PASS · `npm run build` PASS.
+- `scripts/secret-scan.sh` → CLEAN (172 files).
+- `git push origin main` succeeded (`2689116..d73756b`); `HEAD == origin/main`.
+- Session 5's uncommitted `offer-detail-routes.test.tsx` draft (28 tests, 3 failing, with a
+  `sed`-injected debug line) was NOT present in the sandbox — the file was rebuilt from the page
+  source and committed as 24 passing tests (`d73756b`); no debug lines exist in the repo
+  (`grep -rn "console.log" frontend/src/routes/app/*.test.tsx` → none).
+- Frontend vitest note: run `CI=true timeout 300 npx vitest run --no-file-parallelism` (exits cleanly).
+
+### Phase 2 verification — 2026-09-25 (historical — superseded above)
 Run in the Linux sandbox where **vitest itself cannot start** (its `rolldown` needs a
 native binding absent from the Windows-only `node_modules`; npm registry is 403-blocked
 so nothing can be installed). The suite is pure-JS + built-in `node:sqlite`, so it was run
@@ -108,21 +124,24 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 2 Unit 9 (Offer behavioral tests) COMPLETE: `backend/src/test/offers.test.ts`
-(15 tests across 4 suites) — version-1 immutability + current-pointer move, integer
-`amount_minor`/currency economics with float/commission/REVSHARE rejections, full
-review lifecycle with no advertiser self-approval, marketplace confidentiality (advertiser
-payout/margin/budget never exposed to affiliates), PRIVATE + APPLICATION_REQUIRED access
-enforced server-side, and cross-tenant + cross-affiliate isolation. Backend 149/149,
-both tsc typechecks exit 0 (via node:test harness — vitest can't run in this sandbox).
+Phase 2 Unit 7 frontend tests — `frontend/src/routes/app/offer-detail-routes.test.tsx`
+(24 tests, `d73756b`): rendering (owner-only economics, histories, 404 no-enumeration, 403,
+not-a-member), lifecycle (buttons only from `allowed_transitions`, `/submit` vs `/transition`,
+§124 reason collection, backend permission split, read-only member, 409), new version
+(exact string pre-fill, integer-minor POST with no ids/decimals, never PUT/PATCH a version,
+client-side commission≤payout, ARCHIVED hides it), access grants (grant-managed modes only,
+per-status actions, one PUT per action keyed by affiliate org id, prompt reason trimming,
+UUID-validated invite form, server refusal surfaced). With this, every Phase 2 page has
+route tests; Phase 2 is COMPLETE (10/10).
 
 ## Next Planned Unit
-Phase 2 backend is engineering-complete (Units 1–6, 8, 9 COMPLETE; Unit 7 API complete,
-frontend marketplace UI outstanding). Remaining before Phase 2 can be declared 100%:
-(1) frontend marketplace UI (Unit 7) — blocked in this sandbox (no frontend toolchain);
-(2) commit + `git push origin main` so `HEAD==origin/main` — blocked (GitHub proxy 403).
-Resume when npm registry + GitHub are reachable: `npm ci` both sides, run vitest + builds
-for real, build the marketplace UI, then commit/push. Do NOT start Phase 3.
+Phase 2 is COMPLETE. **WAIT for the Phase 3 instruction**
+(`06-PHASE3-TRACKING-SMARTLINKS-ATTRIBUTION.md`) — do not start it automatically.
+When resumed, first re-verify quickly (`npm ci` both sides → typecheck → vitest → build →
+secret scan) and confirm `HEAD == origin/main`, then begin Phase 3 Unit 1.
+Carry-over items that are NOT Phase 2 blockers: PLATFORM-org bootstrap path (Phase 9),
+placeholder Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval (no PRD unit
+assigns it to Phase 2; the API `platformOfferRoutes` exists and is tested).
 
 ## Open Questions / Blockers
 - Device metadata limited to `ip_address` + `user_agent` (PRD §12 satisfied at that level).
@@ -198,9 +217,8 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-09-25 — Phase 2 offers/marketplace session. Added `backend/src/test/offers.test.ts`
-(Unit 9, 15 tests) and fixed one test bug (unwrap `{version}` envelope). Backend suite
-149/149 via node:test harness, both tsc typechecks exit 0. Phase 2 unit table refreshed
-from actual repo state (Units 1–6, 8, 9 COMPLETE; Unit 7 API complete + frontend UI
-outstanding). No source code changed; only the test file added. Not verified in-sandbox:
-vitest itself, frontend, builds; `git push`/`HEAD==origin/main` blocked by proxy 403.
+2026-09-26 — Session 6. Rebuilt and committed the lost `offer-detail-routes.test.tsx`
+(24 tests, `d73756b`). Full toolchain verification for the first time since Phase 2 began:
+backend vitest 153/153, frontend vitest 104/104, both typechecks, frontend build, secret
+scan CLEAN, push succeeded. Phase 2 unit table: 10/10 COMPLETE. No source code changed
+this session (test file + STATE.md only).
