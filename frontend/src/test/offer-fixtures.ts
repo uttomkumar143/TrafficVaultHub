@@ -139,5 +139,10 @@ export function makeMarketplaceOffer(overrides: Partial<MarketplaceOffer> = {}):
   };
 }
 
-/** Strings that must never appear in affiliate-facing DOM (PRD §29). */
-export const CONFIDENTIAL_MARKERS = ["advertiser_payout", "network_margin", "budget", "Advertiser payout", "Network margin", "Budget"];
+/**
+ * Patterns that must never appear in affiliate-facing DOM (PRD §29): raw
+ * field names and the owner-only labels rendered by `VersionDetails`.
+ * `>Budget<` matches the confidential `<dt>Budget</dt>` but NOT the legitimate
+ * "Budget exhausted" lifecycle status label.
+ */
+export const CONFIDENTIAL_MARKERS: RegExp[] = [/advertiser_payout/, /network_margin/, /budget_minor/, /Advertiser payout/, /Network margin/, />Budget</];
