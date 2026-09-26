@@ -631,16 +631,25 @@ export class OfferRepository {
       vertical?: string;
       country?: string;
       payout_type?: PayoutType;
+      /** Affiliate-visible payout floor, integer minor units (PRD §25/§29). */
+      min_commission_minor?: number;
       device?: string;
       traffic_source?: string;
       access_mode?: AccessMode;
+      /** Must already be one of the marketplace-visible statuses (service-validated). */
+      status?: OfferStatus;
     },
   ): Promise<Page<OfferWithMarketplaceRow>> {
     const where: string[] = [];
     const binds: unknown[] = [];
 
-    // Only offers the marketplace may ever surface.
+    // Only offers the marketplace may ever surface. A caller-supplied status
+    // can only NARROW this set (it is ANDed, never substituted).
     where.push("o.status IN ('LIVE','PAUSED','CAP_REACHED','BUDGET_EXHAUSTED')");
+    if (filter.status) {
+      where.push("o.status = ?");
+      binds.push(filter.status);
+    }
 
     // Access-mode gate. A NULL affiliate org (an org with no affiliate profile)
     // still sees PUBLIC / APPLICATION_REQUIRED offers but never restricted ones.
@@ -667,6 +676,12 @@ export class OfferRepository {
     if (filter.payout_type) {
       versionFilter.push("cv.payout_type = ?");
       versionBinds.push(filter.payout_type);
+    }
+    if (filter.min_commission_minor !== undefined) {
+      // Compares the AFFILIATE commission only — the advertiser payout is
+      // confidential and is never a filter dimension for affiliates.
+      versionFilter.push("cv.affiliate_commission_minor >= ?");
+      versionBinds.push(filter.min_commission_minor);
     }
     if (filter.vertical) {
       where.push("o.vertical = ?");

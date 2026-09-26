@@ -52,6 +52,7 @@ import {
   allowedTargets,
   canTransition,
   isOfferStatus,
+  MARKETPLACE_VISIBLE_STATUSES,
   requiresReason,
   VERSIONABLE_STATUSES,
   type AccessGrantStatus,
@@ -568,13 +569,23 @@ export class OfferService {
       vertical?: string;
       country?: string;
       payout_type?: PayoutType;
+      min_commission_minor?: number;
       device?: string;
       traffic_source?: string;
       access_mode?: AccessMode;
+      status?: OfferStatus;
     },
   ): Promise<Page<PublicMarketplaceOffer>> {
     this.assertAffiliateOrg(tenant);
     this.ensurePermission(tenant, "offers.read");
+    // A status filter may only narrow the marketplace-visible set; asking for
+    // DRAFT/UNDER_REVIEW/etc. is a validation error, never a wider window.
+    if (filter.status && !MARKETPLACE_VISIBLE_STATUSES.has(filter.status)) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid request: status");
+    }
+    if (filter.min_commission_minor !== undefined && !Number.isSafeInteger(filter.min_commission_minor)) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid request: min_commission_minor");
+    }
     const affId = tenant.organization.id;
     const result = await this.repo.searchMarketplace(page, { affiliate_organization_id: affId, ...filter });
     const items = await Promise.all(

@@ -414,3 +414,128 @@ describe("offers: access-mode enforcement", () => {
     expect(await h.errorCode(res)).toBe("AFFILIATE_ORG_INVALID");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Marketplace search filters (PRD §29): vertical, country, payout floor,
+// payout type, device, traffic source, access mode, status — every filter
+// narrows only; none can widen the visibility window or reach confidential
+// advertiser economics.
+// ---------------------------------------------------------------------------
+describe("offers: marketplace search filters", () => {
+  const mkt = async (aff: { owner: string; orgId: string }, qs: string) => {
+    const res = await h.as(aff.owner, "GET", `/organizations/${aff.orgId}/marketplace${qs}`);
+    expect(res.status).toBe(200);
+    return (await json<{ items: MktOffer[] }>(res)).items.map((o) => o.name).sort();
+  };
+
+  it("filters by vertical, payout type, payout floor, access mode and targeting dimensions", async () => {
+    const { owner, orgId } = await advertiser();
+    const plat = await platform();
+    await toLive(owner, orgId, plat, {
+      name: "Finance CPA US mobile",
+      vertical: "finance",
+      version: V1, // commission 4000 USD
+      targeting: [
+        { dimension: "COUNTRY", value: "US" },
+        { dimension: "DEVICE", value: "MOBILE" },
+        { dimension: "TRAFFIC_SOURCE", value: "SOCIAL" },
+      ],
+    });
+    await toLive(owner, orgId, plat, {
+      name: "Gaming CPL DE",
+      vertical: "gaming",
+      access_mode: "APPLICATION_REQUIRED",
+      version: { ...V1, payout_type: "CPL", advertiser_payout_minor: 1500, affiliate_commission_minor: 1200, network_margin_minor: 300 },
+      targeting: [{ dimension: "COUNTRY", value: "DE" }],
+    });
+    await toLive(owner, orgId, plat, {
+      name: "Untargeted revshare",
+      vertical: "finance",
+      version: { ...V1, payout_type: "REVSHARE", advertiser_payout_minor: 0, affiliate_commission_minor: 0, network_margin_minor: 0, revshare_percent_bps: 2500 },
+    });
+    const aff = await affiliate();
+
+    expect(await mkt(aff, "")).toEqual(["Finance CPA US mobile", "Gaming CPL DE", "Untargeted revshare"]);
+    expect(await mkt(aff, "?vertical=finance")).toEqual(["Finance CPA US mobile", "Untargeted revshare"]);
+    expect(await mkt(aff, "?payout_type=CPL")).toEqual(["Gaming CPL DE"]);
+    // Payout floor compares the affiliate commission only (integer minor units).
+    expect(await mkt(aff, "?min_commission_minor=1200")).toEqual(["Finance CPA US mobile", "Gaming CPL DE"]);
+    expect(await mkt(aff, "?min_commission_minor=4000")).toEqual(["Finance CPA US mobile"]);
+    expect(await mkt(aff, "?min_commission_minor=4001")).toEqual([]);
+    expect(await mkt(aff, "?access_mode=APPLICATION_REQUIRED")).toEqual(["Gaming CPL DE"]);
+    // Targeting: an offer with NO allow-list for a dimension matches every value.
+    expect(await mkt(aff, "?country=us")).toEqual(["Finance CPA US mobile", "Untargeted revshare"]);
+    expect(await mkt(aff, "?country=DE")).toEqual(["Gaming CPL DE", "Untargeted revshare"]);
+    expect(await mkt(aff, "?device=desktop")).toEqual(["Gaming CPL DE", "Untargeted revshare"]);
+    expect(await mkt(aff, "?traffic_source=SOCIAL")).toEqual(["Finance CPA US mobile", "Gaming CPL DE", "Untargeted revshare"]);
+    expect(await mkt(aff, "?traffic_source=EMAIL")).toEqual(["Gaming CPL DE", "Untargeted revshare"]);
+    // Filters combine with AND.
+    expect(await mkt(aff, "?vertical=finance&country=US&payout_type=CPA")).toEqual(["Finance CPA US mobile"]);
+  });
+
+  it("lets a status filter narrow to LIVE or PAUSED but never widen past the marketplace-visible set", async () => {
+    const { owner, orgId } = await advertiser();
+    const plat = await platform();
+    const live = await toLive(owner, orgId, plat, { name: "Stays live", version: V1 });
+    const paused = await toLive(owner, orgId, plat, { name: "Gets paused", version: V1 });
+    expect(
+      (await h.as(owner, "POST", `/organizations/${orgId}/offers/${paused.id}/transition`, { to: "PAUSED" })).status,
+    ).toBe(200);
+    // A DRAFT offer that must never appear regardless of filter.
+    await h.as(owner, "POST", `/organizations/${orgId}/offers`, { name: "Draft never listed", version: V1 });
+    const aff = await affiliate();
+
+    expect(await mkt(aff, "")).toEqual(["Gets paused", "Stays live"]);
+    expect(await mkt(aff, "?status=LIVE")).toEqual(["Stays live"]);
+    expect(await mkt(aff, "?status=PAUSED")).toEqual(["Gets paused"]);
+    const pausedItem = (await json<{ items: MktOffer[] }>(
+      await h.as(aff.owner, "GET", `/organizations/${aff.orgId}/marketplace?status=PAUSED`),
+    )).items[0]!;
+    expect(pausedItem.id).toBe(paused.id);
+    expect(pausedItem.can_join).toBe(false); // only LIVE is joinable
+    expect(live.status).toBe("LIVE");
+
+    // Non-marketplace statuses are rejected — not silently widened.
+    for (const s of ["DRAFT", "UNDER_REVIEW", "APPROVED", "ARCHIVED", "BOGUS"]) {
+      const res = await h.as(aff.owner, "GET", `/organizations/${aff.orgId}/marketplace?status=${s}`);
+      expect(res.status).toBe(400);
+      expect(await h.errorCode(res)).toBe("VALIDATION_ERROR");
+    }
+  });
+
+  it("rejects malformed filter values (float/negative payout floor, unknown payout type / access mode)", async () => {
+    const aff = await affiliate();
+    for (const qs of [
+      "?min_commission_minor=12.50",
+      "?min_commission_minor=-1",
+      "?min_commission_minor=abc",
+      "?payout_type=CPX",
+      "?access_mode=SECRET",
+    ]) {
+      const res = await h.as(aff.owner, "GET", `/organizations/${aff.orgId}/marketplace${qs}`);
+      expect(res.status, qs).toBe(400);
+      expect(await h.errorCode(res)).toBe("VALIDATION_ERROR");
+    }
+  });
+
+  it("never lets a filter reveal a restricted offer or confidential economics", async () => {
+    const { owner, orgId } = await advertiser();
+    const plat = await platform();
+    const hidden = await toLive(owner, orgId, plat, {
+      name: "Affiliate specific",
+      vertical: "finance",
+      access_mode: "AFFILIATE_SPECIFIC",
+      version: V1,
+    });
+    const aff = await affiliate();
+    // Every filter that would match the hidden offer still yields nothing.
+    for (const qs of ["?vertical=finance", "?access_mode=AFFILIATE_SPECIFIC", "?min_commission_minor=0", "?status=LIVE", "?payout_type=CPA"]) {
+      const res = await h.as(aff.owner, "GET", `/organizations/${aff.orgId}/marketplace${qs}`);
+      const body = await res.text();
+      expect(body, qs).not.toContain(hidden.id);
+      expect(body).not.toContain("advertiser_payout");
+      expect(body).not.toContain("network_margin");
+      expect(body).not.toContain("budget_minor");
+    }
+  });
+});

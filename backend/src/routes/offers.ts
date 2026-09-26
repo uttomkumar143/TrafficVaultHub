@@ -20,7 +20,7 @@
  *
  * Affiliate marketplace (`:orgId` = AFFILIATE / PARTNER org; `offers.read`):
  *   GET    /organizations/:orgId/marketplace                            → 200 { items, next_cursor }
- *          ?vertical=&country=&payout_type=&device=&traffic_source=&access_mode=&limit=&cursor=
+ *          ?vertical=&country=&payout_type=&min_commission_minor=&device=&traffic_source=&access_mode=&status=&limit=&cursor=
  *   GET    /organizations/:orgId/marketplace/:offerId                   → 200 { offer }
  *   POST   /organizations/:orgId/marketplace/:offerId/apply             → 201|200 { grant }
  *
@@ -46,9 +46,11 @@ import { parseJsonBody } from "../lib/validation";
 import { requirePermission } from "../middleware/require-org";
 import {
   ACCESS_MODES,
+  MARKETPLACE_VISIBLE_STATUSES,
   OFFER_STATUSES,
   PAYOUT_TYPES,
   TARGETING_DIMENSIONS,
+  type OfferStatus,
 } from "../modules/offers/state-machine";
 
 const text = (max: number) => z.string().trim().max(max);
@@ -248,9 +250,11 @@ marketplaceRoutes.get("/", requirePermission("offers.read"), async (c) => {
     vertical: c.req.query("vertical") || undefined,
     country: c.req.query("country")?.toUpperCase() || undefined,
     payout_type: payoutType(c.req.query("payout_type")),
+    min_commission_minor: minorAmount(c.req.query("min_commission_minor")),
     device: c.req.query("device")?.toUpperCase() || undefined,
     traffic_source: c.req.query("traffic_source")?.toUpperCase() || undefined,
     access_mode: accessMode(c.req.query("access_mode")),
+    status: marketplaceStatus(c.req.query("status")),
   };
   const result = await c.get("offerService").searchMarketplace(c.get("tenant"), page, filter);
   return c.json(result, 200);
@@ -280,6 +284,28 @@ function accessMode(raw: string | undefined) {
     throw new AppError(400, "VALIDATION_ERROR", "Invalid request: access_mode");
   }
   return raw as (typeof ACCESS_MODES)[number];
+}
+
+/** Only marketplace-visible statuses are filterable; anything else is a 400, not a wider window. */
+function marketplaceStatus(raw: string | undefined): OfferStatus | undefined {
+  if (!raw) return undefined;
+  if (!MARKETPLACE_VISIBLE_STATUSES.has(raw as OfferStatus)) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid request: status");
+  }
+  return raw as OfferStatus;
+}
+
+/** Integer minor units only (PRD §25) — a decimal or negative payout floor is rejected. */
+function minorAmount(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  if (!/^\d{1,18}$/.test(raw)) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid request: min_commission_minor");
+  }
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n > MINOR_MAX) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid request: min_commission_minor");
+  }
+  return n;
 }
 
 // ---- platform review ---------------------------------------------------------
