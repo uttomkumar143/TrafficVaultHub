@@ -146,15 +146,23 @@ describe("permission resolution (user → membership → role → permissions)",
     expect((await me(owner, org.id)).permissions).toEqual(
       expect.arrayContaining(["organizations.update", "members.manage", "payouts.read", "audit.read"]),
     );
-    // VIEWER is the shared read-only tenant role (0004 + 0005 + 0006 read keys).
+    // VIEWER is the shared read-only tenant role (0004 + 0005 + 0006 + 0008 read keys).
     expect((await me(vwr, org.id)).permissions).toEqual([
       "advertisers.read",
       "affiliates.read",
+      "attribution.read",
       "conversions.read",
       "members.read",
       "offers.read",
       "organizations.read",
+      "tracking.read",
     ]);
+    // 0008: only AFFILIATE_OWNER / AFFILIATE_MANAGER may manage tracking links; nobody on the
+    // affiliate side holds attribution.manage (advertiser-owned policy + secrets).
+    expect((await me(owner, org.id)).permissions).toEqual(expect.arrayContaining(["tracking.manage"]));
+    expect((await me(mgr, org.id)).permissions).toEqual(expect.arrayContaining(["tracking.manage"]));
+    for (const token of [usr, vwr]) expect((await me(token, org.id)).permissions).not.toContain("tracking.manage");
+    for (const token of [owner, mgr, usr, vwr]) expect((await me(token, org.id)).permissions).not.toContain("attribution.manage");
     // Network-only powers never appear on tenant roles.
     for (const token of [owner, mgr, usr, vwr]) {
       const perms = (await me(token, org.id)).permissions;

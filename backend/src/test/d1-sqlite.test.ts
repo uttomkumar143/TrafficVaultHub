@@ -11,15 +11,21 @@ describe("test D1 shim", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
       .all<{ name: string }>();
     expect(rows.results.map((r) => r.name)).toEqual([
+      "advertiser_postback_secrets",
       "advertiser_profiles",
       "advertiser_status_transitions",
       "affiliate_offer_access",
       "affiliate_profiles",
       "affiliate_status_transitions",
       "affiliate_traffic_sources",
+      "attribution_policies",
+      "attributions",
       "audit_logs",
       "auth_events",
       "auth_tokens",
+      "clicks",
+      "conversions",
+      "offer_cap_counters",
       "offer_status_transitions",
       "offer_version_targeting",
       "offer_versions",
@@ -27,10 +33,14 @@ describe("test D1 shim", () => {
       "organization_members",
       "organizations",
       "permissions",
+      "postback_nonces",
       "role_org_types",
       "role_permissions",
       "roles",
       "sessions",
+      "smartlink_offers",
+      "smartlinks",
+      "tracking_links",
       "user_credentials",
       "users",
     ]);
@@ -90,6 +100,8 @@ describe("test D1 shim", () => {
       "affiliates.manage",
       "affiliates.read",
       "affiliates.review",
+      "attribution.manage",
+      "attribution.read",
       "audit.read",
       "compliance.read",
       "compliance.resolve",
@@ -113,6 +125,8 @@ describe("test D1 shim", () => {
       "payouts.read",
       "payouts.release",
       "payouts.review",
+      "tracking.manage",
+      "tracking.read",
     ]);
 
     const grants = await db
@@ -136,10 +150,12 @@ describe("test D1 shim", () => {
     expect(byRole.get("VIEWER")).toEqual([
       "advertisers.read",
       "affiliates.read",
+      "attribution.read",
       "conversions.read",
       "members.read",
       "offers.read",
       "organizations.read",
+      "tracking.read",
     ]);
 
     // 0005: tenant advertiser roles manage their own profile; only platform roles review.
@@ -153,6 +169,14 @@ describe("test D1 shim", () => {
     expect(byRole.get("AFFILIATE_USER")).not.toEqual(expect.arrayContaining(["affiliates.manage"]));
     expect(byRole.get("ADVERTISER_OWNER")!.filter((k) => k.startsWith("affiliates."))).toEqual([]);
     expect(byRole.get("OPERATIONS_ADMIN")).toEqual(expect.arrayContaining(["affiliates.review"]));
+
+    // 0008: affiliates own tracking links/SmartLinks; advertisers own attribution policy + postback secrets.
+    expect(byRole.get("AFFILIATE_OWNER")).toEqual(expect.arrayContaining(["tracking.read", "tracking.manage", "attribution.read"]));
+    expect(byRole.get("AFFILIATE_OWNER")).not.toEqual(expect.arrayContaining(["attribution.manage"]));
+    expect(byRole.get("AFFILIATE_USER")).not.toEqual(expect.arrayContaining(["tracking.manage"]));
+    expect(byRole.get("ADVERTISER_OWNER")).toEqual(expect.arrayContaining(["tracking.read", "attribution.read", "attribution.manage"]));
+    expect(byRole.get("ADVERTISER_OWNER")).not.toEqual(expect.arrayContaining(["tracking.manage"]));
+    expect(byRole.get("BILLING_MANAGER")).not.toEqual(expect.arrayContaining(["attribution.manage"]));
 
     // Network-only powers never reach tenant roles (PRD §11 separation of duties).
     const networkOnly = [

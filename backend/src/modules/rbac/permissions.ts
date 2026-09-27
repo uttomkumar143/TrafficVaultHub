@@ -48,6 +48,11 @@ export const PERMISSION_KEYS = [
   "affiliates.read",
   "affiliates.manage",
   "affiliates.review",
+  // tracking & attribution (Phase 3 Unit 8, migration 0008)
+  "tracking.read",
+  "tracking.manage",
+  "attribution.read",
+  "attribution.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
