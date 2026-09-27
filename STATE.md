@@ -3,9 +3,46 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
+**Phase 3 — Tracking, Attribution & SmartLinks** (`06-PHASE3-TRACKING-SMARTLINKS-ATTRIBUTION.md`),
+started Session 9 (2026-09-27), instructed by the user. Unit 8 (migration) landed FIRST at
+`453da7c` because every other unit needs the schema; see "Phase 3 — unit status" below.
+
 Phase 2 — Advertisers, Affiliates, Offers & Marketplace (`05-PHASE2-OFFERS-MARKETPLACE.md`)
-— **all 10 units COMPLETE as of `d73756b` (2026-09-26)**; see "Phase 2 — unit status" and
-"Phase 2 verification — 2026-09-26" below. Awaiting the Phase 3 instruction; do not start it automatically.
+is **COMPLETE, all 10 units, as of `d73756b` (2026-09-26)**; see "Phase 2 — unit status" and
+"Phase 2 verification — 2026-09-26" below. Do not redo it.
+
+## Phase 3 — unit status
+
+| Unit | Scope | Status |
+|------|-------|--------|
+| 1 | Click ID & tracking links (module + routes) | NOT STARTED |
+| 2 | Public tracking redirect endpoint (`/t/:code`, p95 < 100ms, queue for non-critical) | NOT STARTED |
+| 3 | SmartLink engine (eligibility + 6 routing modes, algorithm version recorded) | NOT STARTED |
+| 4 | Cap protection (Durable Object counters → `offer_cap_counters` snapshot) | NOT STARTED |
+| 5 | KV cache + invalidation (pause / cap / budget / tracking / access revoked / compliance) | NOT STARTED |
+| 6 | Failover (re-evaluate, alternative offer, never an inactive one) | NOT STARTED |
+| 7 | Attribution engine (windows, dedup, S2S postback HMAC + nonce replay guard, PRD §36 record) | NOT STARTED |
+| 8 | Migration `0008_tracking.sql` | **COMPLETE** — `453da7c`. 10 tables: `tracking_links`, `smartlinks`, `smartlink_offers`, `clicks`, `conversions`, `attributions`, `attribution_policies`, `offer_cap_counters`, `postback_nonces`, `advertiser_postback_secrets`; keys `tracking.read/manage`, `attribution.read/manage` (…1101–1104) + grants; `PERMISSION_KEYS` extended; `d1-sqlite.test.ts` + `rbac.test.ts` grant assertions updated; `migrations/README.md` rows 0005–0008 |
+| 9 | Critical tracking tests (PRD §115: unique click id, invalid offer rejected, inactive offer never routed, dedup, invalid signature, replay, attribution recorded) | NOT STARTED |
+| 10 | STATE.md | this update |
+
+Schema decisions baked into 0008 that later units MUST honour:
+- `clicks` is INSERT-only; `clicks.id` IS the `click_id`; exactly one of `tracking_link_id`/`smartlink_id`
+  (XOR CHECK); `offer_version_id` pins the version current at click time; PRD §34 → coarse signals only
+  (`country_code`, `region_code`, `device_type`, `os_family`, `browser_family`, `language`, salted
+  `ip_hash`, `user_agent_hash`) — NEVER store the raw IP or fingerprint data in this table.
+- `conversions` dedup = `UNIQUE (organization_id, offer_id, external_conversion_id)` (advertiser org);
+  Phase-3 states only (`RECEIVED`,`VALIDATING`,`PENDING`,`REJECTED`,`FRAUD_REVIEW`) — Phase 4 extends
+  the CHECK via a NEW migration.
+- `attributions` INSERT-only, `UNIQUE conversion_id`, `rule_version` is an FK to the exact
+  `attribution_policies` row (versioned per offer, INSERT-only, one `is_current` per offer).
+- `postback_nonces` PK `(organization_id, nonce)` IS the replay check (atomic insert-or-fail).
+- `advertiser_postback_secrets.secret_ciphertext` = HMAC key encrypted at rest (AES-GCM under a Worker
+  master key named by `key_version`); plaintext returned once at creation, never SELECTed by list/read
+  routes, never logged; `secret_hint` = last 4 chars. Needs a `POSTBACK_SECRET_MASTER_KEY` Worker secret
+  (`.dev.vars.example` placeholder only) when Unit 7 lands.
+- `offer_cap_counters` is the durable snapshot the Durable Object flushes to; `period_key` =
+  `YYYY-MM-DD` / `YYYY-MM` / `TOTAL`; `exhausted_at` set once → KV invalidation trigger (Unit 5).
 
 Phase 0 is COMPLETE (`2d4c17f`..`c25f376`; CI activated later at `22b13e9`,
 green since `748c3f7`) — re-audited unit-by-unit against `03-PHASE0-BOOTSTRAP.md`
@@ -124,24 +161,25 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 2 Unit 7 frontend tests — `frontend/src/routes/app/offer-detail-routes.test.tsx`
-(24 tests, `d73756b`): rendering (owner-only economics, histories, 404 no-enumeration, 403,
-not-a-member), lifecycle (buttons only from `allowed_transitions`, `/submit` vs `/transition`,
-§124 reason collection, backend permission split, read-only member, 409), new version
-(exact string pre-fill, integer-minor POST with no ids/decimals, never PUT/PATCH a version,
-client-side commission≤payout, ARCHIVED hides it), access grants (grant-managed modes only,
-per-status actions, one PUT per action keyed by affiliate org id, prompt reason trimming,
-UUID-validated invite form, server refusal surfaced). With this, every Phase 2 page has
-route tests; Phase 2 is COMPLETE (10/10).
+Phase 3 Unit 8 — `migrations/0008_tracking.sql` (`453da7c`, Session 10). Session 9 drafted it
+but its sandbox (and the uncommitted draft) was lost; Session 10 rebuilt it from the Phase 3
+spec + PRD §31–§46/§115/§129–130, extended `PERMISSION_KEYS`, updated the `d1-sqlite.test.ts`
+table/permission/VIEWER parity lists and the `rbac.test.ts` VIEWER exact set (+ ownership-split
+assertions), added README rows 0005–0008. Verified: backend vitest **153/153** (17 files),
+typecheck PASS, secret scan CLEAN (173 files), push OK, `HEAD == origin/main`.
 
 ## Next Planned Unit
-Phase 2 is COMPLETE. **WAIT for the Phase 3 instruction**
-(`06-PHASE3-TRACKING-SMARTLINKS-ATTRIBUTION.md`) — do not start it automatically.
-When resumed, first re-verify quickly (`npm ci` both sides → typecheck → vitest → build →
-secret scan) and confirm `HEAD == origin/main`, then begin Phase 3 Unit 1.
-Carry-over items that are NOT Phase 2 blockers: PLATFORM-org bootstrap path (Phase 9),
-placeholder Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval (no PRD unit
-assigns it to Phase 2; the API `platformOfferRoutes` exists and is tested).
+**Phase 3 Unit 1 — Click ID & tracking links**: `backend/src/modules/tracking/{repository,
+service}.ts` + `routes/tracking.ts` mounted at `/api/v1/organizations/:orgId/tracking-links`
+(affiliate tenant; `requireAuth → requireOrg → requirePermission("tracking.read"|"tracking.manage")`),
+`click_id` = `crypto.randomUUID()`, public `code` = 10-char base32 from `crypto.getRandomValues`
+(UNIQUE retry), create requires an APPROVED grant or PUBLIC access on a LIVE offer (reuse
+`OfferService` access resolution), sub1–5 trimmed/≤255/no PII validation, list via
+`lib/pagination.ts`, `lib/request-meta.ts` for audit. Add `trackingService` to `Variables` +
+`wireServices`. Then Unit 2 (public `/t/:code` — minimal path, KV lookup, DO cap check, one
+click INSERT, `EVENTS_QUEUE` for enrichment, 302). Unit order after that: 3 → 4 → 5 → 6 → 7 → 9.
+Carry-over items that are NOT Phase 3 blockers: PLATFORM-org bootstrap path (Phase 9),
+placeholder Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval.
 
 ## Open Questions / Blockers
 - Device metadata limited to `ip_address` + `user_agent` (PRD §12 satisfied at that level).
@@ -217,8 +255,8 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-09-26 — Session 6. Rebuilt and committed the lost `offer-detail-routes.test.tsx`
-(24 tests, `d73756b`). Full toolchain verification for the first time since Phase 2 began:
-backend vitest 153/153, frontend vitest 104/104, both typechecks, frontend build, secret
-scan CLEAN, push succeeded. Phase 2 unit table: 10/10 COMPLETE. No source code changed
-this session (test file + STATE.md only).
+2026-09-27 — Session 10. Phase 3 started (user instruction, Session 9). Session 9's uncommitted
+Unit 8 draft was NOT present in the sandbox (`git status` clean at `b71cb2a`); rebuilt and
+committed as `453da7c`. Backend vitest 153/153, typecheck PASS, secret scan CLEAN, push OK.
+Frontend not touched this session (no frontend change in Unit 8). Phase 3: 1/10 units
+(Unit 8) COMPLETE; next is Unit 1.
