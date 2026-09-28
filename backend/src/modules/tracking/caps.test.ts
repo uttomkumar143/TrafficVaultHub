@@ -88,7 +88,9 @@ describe("caps: click caps", () => {
     const removed = pruneClosedPeriods(s, new Date("2026-05-01T00:00:00.000Z"));
     // Every period a reserve touched (including the denied ones, which open the counter) is closed.
     expect(removed.map((c) => c.period_key).sort()).toEqual(["2026-03", "2026-03-15", "2026-03-16", "2026-03-17", "2026-04", "2026-04-01"]);
-    expect([...s.values()].map((c) => c.period_key)).toEqual(["TOTAL"]);
+    // The May 1 reserve opened the current DAILY/MONTHLY periods before TOTAL denied it;
+    // those are still open at `now`, so they survive the prune alongside TOTAL.
+    expect([...s.values()].map((c) => c.period_key).sort()).toEqual(["2026-05", "2026-05-01", "TOTAL"]);
   });
 
   it("treats a null limit as uncapped (still counts) and a 0 limit as deny-all", () => {
