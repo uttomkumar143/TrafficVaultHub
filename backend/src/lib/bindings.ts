@@ -23,7 +23,11 @@ export interface Bindings {
   STORAGE: R2Bucket;
   EVENTS_QUEUE: Queue;
 
-  // Durable Object namespace — placeholder class, no behaviour in Phase 0.
+  /**
+   * Durable Object namespace — `CoordinatorObject` (Phase 3 Unit 4): one
+   * object per offer holding the live cap counters; addressed through
+   * `DurableCapLedger` (`modules/tracking/cap-ledger.ts`), never directly.
+   */
   COORDINATOR: DurableObjectNamespace;
 }
 
