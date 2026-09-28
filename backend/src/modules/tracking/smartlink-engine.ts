@@ -226,7 +226,9 @@ function byPriorityThenWeightThenId(a: SmartLinkCandidate, b: SmartLinkCandidate
 
 function pickRuleBased(pool: SmartLinkCandidate[]): { pick: SmartLinkCandidate; code: string } {
   const sorted = [...pool].sort(byPriorityThenWeightThenId);
-  return { pick: sorted[0], code: "RULE_PRIORITY" };
+  const pick = sorted[0];
+  if (!pick) throw new Error("pickRuleBased: empty pool");
+  return { pick, code: "RULE_PRIORITY" };
 }
 
 /** Weighted random over integer weights; `random()` in [0,1). Deterministic given `random`. */
@@ -236,11 +238,14 @@ export function weightedPick<T extends { weight: number }>(pool: readonly T[], r
   const r = random();
   if (!(r >= 0 && r < 1)) throw new Error("weightedPick: random() must return a number in [0, 1)");
   let cursor = Math.floor(r * total);
+  let last: T | undefined;
   for (const c of pool) {
     if (cursor < c.weight) return c;
     cursor -= c.weight;
+    last = c;
   }
-  return pool[pool.length - 1];
+  if (!last) throw new Error("weightedPick: empty pool");
+  return last;
 }
 
 function pickWeighted(pool: SmartLinkCandidate[], random: () => number): { pick: SmartLinkCandidate; code: string } {
@@ -269,6 +274,7 @@ function pickPerformance(pool: SmartLinkCandidate[], random: () => number): { pi
     const d = conversionRateBps(b.stats) - conversionRateBps(a.stats);
     return d !== 0 ? d : byPriorityThenWeightThenId(a, b);
   })[0];
+  if (!best) throw new Error("pickPerformance: empty pool");
   return { pick: best, code: "PERFORMANCE_BEST_CR" };
 }
 

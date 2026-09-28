@@ -65,7 +65,7 @@ function link(mode: SmartLinkDefinition["routing_mode"], over: Partial<SmartLink
 /** A deterministic random source cycling through the given values. */
 function seq(values: number[]): () => number {
   let i = 0;
-  return () => values[i++ % values.length];
+  return () => values[i++ % values.length] ?? 0;
 }
 
 function offerOf(d: RoutingDecision): string {
