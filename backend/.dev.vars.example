@@ -6,3 +6,7 @@
 
 # Example (unused in Phase 0):
 # EXAMPLE_SECRET=replace-me
+
+# Phase 3 Unit 2 — salt for the click row's ip_hash / user_agent_hash (PRD §34).
+# Optional: without it those columns stay NULL. Production: `wrangler secret put CLICK_SIGNAL_SALT`.
+# CLICK_SIGNAL_SALT=replace-with-32-random-bytes

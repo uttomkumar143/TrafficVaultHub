@@ -17,6 +17,15 @@ export interface Bindings {
   /** Optional override of the 30-day default (ADR-001 §2). */
   SESSION_TTL_SECONDS?: string;
 
+  // secrets (`wrangler secret put` / `.dev.vars`; never in wrangler.jsonc)
+  /**
+   * Phase 3 Unit 2 — salt for the click row's `ip_hash` / `user_agent_hash`
+   * (PRD §34). Optional: when absent those columns stay NULL rather than
+   * storing an unsalted (brute-forceable) hash. Rotating it changes every
+   * subsequent hash; existing rows are not rewritten.
+   */
+  CLICK_SIGNAL_SALT?: string;
+
   // Cloudflare resources (placeholders in Phase 0 — see wrangler.jsonc)
   DB: D1Database;
   CACHE: KVNamespace;

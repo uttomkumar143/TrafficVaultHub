@@ -11,7 +11,7 @@
  * Test-only. Never imported by production code.
  */
 import { expect } from "vitest";
-import { createApp } from "../app";
+import { createApp, type CreateAppOptions } from "../app";
 import type { Bindings } from "../lib/bindings";
 import { MemoryEmailSender } from "../modules/auth/email";
 import { createTestD1, type TestD1 } from "./d1-sqlite";
@@ -40,10 +40,10 @@ export class TestHarness {
   readonly app: ReturnType<typeof createApp>;
   readonly env: Partial<Bindings>;
 
-  constructor() {
+  constructor(options: Omit<CreateAppOptions, "emailSender"> = {}) {
     this.db = createTestD1();
     this.mail = new MemoryEmailSender();
-    this.app = createApp({ emailSender: this.mail });
+    this.app = createApp({ ...options, emailSender: this.mail });
     this.env = { DB: this.db, APP_ENV: "test", API_VERSION: "v1" };
   }
 

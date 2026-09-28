@@ -18,10 +18,13 @@ import { TrackingService } from "./modules/tracking/service";
 import { authRoutes } from "./routes/auth";
 import { healthRoutes } from "./routes/health";
 import { organizationRoutes } from "./routes/organizations";
+import { redirectRoutes, type RedirectRouteOptions } from "./routes/redirect";
 
 export interface CreateAppOptions {
   /** Override the email port (tests use MemoryEmailSender). */
   emailSender?: EmailSender;
+  /** Test seams for the public redirect endpoints (Phase 3 Unit 2). */
+  redirect?: RedirectRouteOptions;
 }
 
 /**
@@ -101,6 +104,11 @@ export function createApp(options: CreateAppOptions = {}) {
   v1.route("/organizations", organizationRoutes);
 
   app.route("/api/v1", v1);
+
+  // Public click endpoints (Phase 3 Unit 2): GET /t/:code, GET /s/:code.
+  // Deliberately OUTSIDE /api/v1 and outside `wireServices` / auth — they
+  // build their own minimal dependencies per request (hot path, PRD §107).
+  app.route("/", redirectRoutes(options.redirect));
 
   return app;
 }
