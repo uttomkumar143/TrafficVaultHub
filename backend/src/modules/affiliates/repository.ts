@@ -205,6 +205,20 @@ export class AffiliateRepository {
     ).first<AffiliateTrafficSourceRow>();
   }
 
+  /**
+   * Look a declaration up by its row id, still tenant-scoped (Phase 3: a
+   * tracking link may reference one of the tenant's OWN declared sources —
+   * never another tenant's, PRD §27/§94).
+   */
+  findTrafficSourceById(tenantId: TenantId, sourceId: string): Promise<AffiliateTrafficSourceRow | null> {
+    return scopedQuery(
+      this.db,
+      `SELECT * FROM affiliate_traffic_sources WHERE organization_id = ? AND id = ?`,
+      tenantId,
+      sourceId,
+    ).first<AffiliateTrafficSourceRow>();
+  }
+
   /** Insert or update the declaration for (profile, source_type) — one row per type. */
   async upsertTrafficSource(
     tenantId: TenantId,
