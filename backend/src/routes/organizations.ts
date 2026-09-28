@@ -25,6 +25,8 @@
  *   /:orgId/offers(/*)                  → routes/offers.ts       offerRoutes             (Phase 2 Units 3–6, tenant)
  *   /:orgId/marketplace(/*)             → routes/offers.ts       marketplaceRoutes       (Phase 2 Unit 7, affiliate)
  *   /:orgId/platform/offers(/*)         → routes/offers.ts       offerReviewRoutes       (Phase 2 Unit 3, PLATFORM org)
+ *   /:orgId/tracking-links(/*)          → routes/tracking.ts     trackingLinkRoutes      (Phase 3 Unit 1, affiliate)
+ *   /:orgId/offers/:offerId/clicks      → routes/tracking.ts     offerClickRoutes        (Phase 3 Unit 1, advertiser)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -38,6 +40,7 @@ import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
 import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
 import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
 import { marketplaceRoutes, offerReviewRoutes, offerRoutes } from "./offers";
+import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 
 const nameSchema = z.string().trim().min(2).max(120);
 const slugSchema = z
@@ -86,6 +89,12 @@ organizationRoutes.route("/:orgId/platform/affiliates", affiliateReviewRoutes);
 organizationRoutes.route("/:orgId/offers", offerRoutes);
 organizationRoutes.route("/:orgId/marketplace", marketplaceRoutes);
 organizationRoutes.route("/:orgId/platform/offers", offerReviewRoutes);
+
+// Phase 3 sub-modules. `offerClickRoutes` shares the `/offers` prefix with
+// `offerRoutes`; its only path (`/:offerId/clicks`) is not defined there, so
+// there is no overlap and the mount order does not matter.
+organizationRoutes.route("/:orgId/tracking-links", trackingLinkRoutes);
+organizationRoutes.route("/:orgId/offers", offerClickRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);

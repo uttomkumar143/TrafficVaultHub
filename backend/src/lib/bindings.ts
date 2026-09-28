@@ -8,6 +8,7 @@ import type { AffiliateService } from "../modules/affiliates/service";
 import type { AuthService, AuthenticatedContext } from "../modules/auth/service";
 import type { OfferService } from "../modules/offers/service";
 import type { OrganizationService } from "../modules/organizations/service";
+import type { TrackingService } from "../modules/tracking/service";
 
 export interface Bindings {
   // vars
@@ -36,6 +37,8 @@ export interface Variables {
   affiliateService: AffiliateService;
   /** Phase 2 Units 3–7 — offers, versioning, economics, access, marketplace. */
   offerService: OfferService;
+  /** Phase 3 Unit 1 — tracking links + click reads. */
+  trackingService: TrackingService;
   /** Present only after `requireAuth` has run. */
   auth: AuthenticatedContext;
   /** Present only after `requireOrg` has run (RBAC + tenant scope, Unit 4). */

@@ -12,6 +12,8 @@ import { OfferRepository } from "./modules/offers/repository";
 import { OfferService } from "./modules/offers/service";
 import { OrganizationRepository } from "./modules/organizations/repository";
 import { OrganizationService } from "./modules/organizations/service";
+import { TrackingRepository } from "./modules/tracking/repository";
+import { TrackingService } from "./modules/tracking/service";
 import { authRoutes } from "./routes/auth";
 import { healthRoutes } from "./routes/health";
 import { organizationRoutes } from "./routes/organizations";
@@ -71,6 +73,15 @@ export function createApp(options: CreateAppOptions = {}) {
     c.set(
       "offerService",
       new OfferService(new OfferRepository(c.env.DB), new AdvertiserRepository(c.env.DB), c.env.DB),
+    );
+    c.set(
+      "trackingService",
+      new TrackingService(
+        new TrackingRepository(c.env.DB),
+        new AffiliateRepository(c.env.DB),
+        new OfferRepository(c.env.DB),
+        c.env.DB,
+      ),
     );
     await next();
   };
