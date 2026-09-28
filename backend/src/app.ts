@@ -12,6 +12,7 @@ import { OfferRepository } from "./modules/offers/repository";
 import { OfferService } from "./modules/offers/service";
 import { OrganizationRepository } from "./modules/organizations/repository";
 import { OrganizationService } from "./modules/organizations/service";
+import { EligibilityCache } from "./modules/tracking/eligibility-cache";
 import { TrackingRepository } from "./modules/tracking/repository";
 import { TrackingService } from "./modules/tracking/service";
 import { authRoutes } from "./routes/auth";
@@ -70,9 +71,13 @@ export function createApp(options: CreateAppOptions = {}) {
     c.set("organizationService", new OrganizationService(new OrganizationRepository(c.env.DB), c.env.DB));
     c.set("advertiserService", new AdvertiserService(new AdvertiserRepository(c.env.DB), c.env.DB));
     c.set("affiliateService", new AffiliateService(new AffiliateRepository(c.env.DB), c.env.DB));
+    // Eligibility cache (Phase 3 Unit 5) over the CACHE KV binding. Optional:
+    // without the binding (tests, misconfigured env) there is no cache and
+    // therefore nothing stale to invalidate — the redirect reads D1 directly.
+    const eligibilityCache = c.env.CACHE ? new EligibilityCache(c.env.CACHE) : undefined;
     c.set(
       "offerService",
-      new OfferService(new OfferRepository(c.env.DB), new AdvertiserRepository(c.env.DB), c.env.DB),
+      new OfferService(new OfferRepository(c.env.DB), new AdvertiserRepository(c.env.DB), c.env.DB, eligibilityCache),
     );
     c.set(
       "trackingService",

@@ -26,7 +26,7 @@ import {
   offerCacheKey,
   type CachedOfferFacts,
 } from "../modules/tracking/eligibility-cache";
-import { TestHarness, json } from "./fixtures";
+import { PASSWORD, TestHarness, json } from "./fixtures";
 
 const V1 = {
   payout_type: "CPA",
@@ -302,5 +302,35 @@ describe("OfferService: eligibility cache invalidation (Unit 5b)", () => {
     await expect(plain.invalidateOfferRouting(offer.id)).resolves.toBeUndefined();
     expect(kv.calls).toHaveLength(0);
     expect(indexOfCall("delete", offerCacheKey(offer.id))).toBe(-1);
+  });
+});
+
+describe("app wiring (Unit 5c): the CACHE binding feeds OfferService", () => {
+  it("an HTTP LIVE → PAUSED transition invalidates through c.env.CACHE", async () => {
+    const { offer, advEmail, advOrg } = await liveOffer();
+    // MemoryKv satisfies the structural KvPort subset of KVNamespace the cache uses.
+    h.env.CACHE = kv as unknown as KVNamespace;
+    await cache.putOffer(factsOf(offer));
+    const login = await h.api("POST", "/auth/login", {}, { email: advEmail, password: PASSWORD });
+    expect(login.status).toBe(200);
+    const bearer = ((await login.json()) as { token: string }).token;
+    kv.calls.length = 0;
+    const res = await h.as(bearer, "POST", `/organizations/${advOrg}/offers/${offer.id}/transition`, { to: "PAUSED", reason: "pause" });
+    expect(res.status).toBe(200);
+    expect(kv.peek(offerCacheKey(offer.id))).toBeNull();
+    expect(kv.calls.filter((c) => c.op === "delete" && c.key === offerCacheKey(offer.id))).toHaveLength(2);
+  });
+
+  it("a failing CACHE delete makes the HTTP transition fail closed (500, offer stays LIVE)", async () => {
+    const { offer, advEmail, advOrg } = await liveOffer();
+    h.env.CACHE = kv as unknown as KVNamespace;
+    const login = await h.api("POST", "/auth/login", {}, { email: advEmail, password: PASSWORD });
+    const bearer = ((await login.json()) as { token: string }).token;
+    kv.failing.delete = true;
+    const res = await h.as(bearer, "POST", `/organizations/${advOrg}/offers/${offer.id}/transition`, { to: "PAUSED", reason: "pause" });
+    expect(res.status).toBe(500);
+    expect(await h.errorCode(res)).toBe("INTERNAL_ERROR");
+    const row = await repo.findById(tenantIdOf((await tenantFor(advEmail, advOrg)).tenant), offer.id);
+    expect(row?.status).toBe("LIVE");
   });
 });
