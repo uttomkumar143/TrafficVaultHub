@@ -21,7 +21,7 @@
 import { slicePage, type Page, type PageRequest } from "../../lib/pagination";
 import { scopedQuery, type TenantId } from "../../lib/tenant-scope";
 import { nowIso } from "../../lib/time";
-import type { AccessGrantStatus, AccessMode, OfferStatus } from "../offers/state-machine";
+import type { AccessGrantStatus, AccessMode, OfferStatus, TargetingDimension } from "../offers/state-machine";
 import type { SubIds } from "./ids";
 
 export const TRACKING_LINK_STATUSES = ["ACTIVE", "PAUSED", "ARCHIVED"] as const;
@@ -58,10 +58,20 @@ export interface TrackingLinkRow {
 /**
  * The redirect endpoint's single read (Unit 2): the link plus the offer facts
  * needed to decide eligibility and the destination — offer status/access mode,
- * the CURRENT version id + destination, and the caller's access grant status.
- * No advertiser-confidential economics are selected.
+ * the CURRENT version id + destination, the caller's access grant status and
+ * the version's cap/budget limits (Unit 4 `capLimitsFromVersion`). Payout /
+ * commission economics are NOT selected; the cap columns never leave the
+ * redirect decision (they are not echoed to the visitor).
  */
-export interface ResolvedTrackingLinkRow extends TrackingLinkRow {
+export interface OfferCapColumns {
+  daily_conversion_cap: number | null;
+  total_conversion_cap: number | null;
+  budget_minor: number | null;
+  /** Version currency (3 letters); null only when the offer has no current version. */
+  offer_currency: string | null;
+}
+
+export interface ResolvedTrackingLinkRow extends TrackingLinkRow, OfferCapColumns {
   offer_status: OfferStatus;
   offer_access_mode: AccessMode;
   offer_version_id: string | null;
@@ -69,6 +79,41 @@ export interface ResolvedTrackingLinkRow extends TrackingLinkRow {
   targeting_starts_at: string | null;
   targeting_ends_at: string | null;
   grant_status: AccessGrantStatus | null;
+}
+
+/** The public redirect's SmartLink read (Unit 2 over Units 3/6): the link row only; the pool is a second read. */
+export interface ResolvedSmartLinkRow {
+  id: string;
+  organization_id: string;
+  affiliate_profile_id: string;
+  traffic_source_id: string | null;
+  code: string;
+  routing_mode: RoutingMode;
+  status: TrackingLinkStatus;
+  fallback_url: string | null;
+}
+
+/** One `smartlink_offers` row joined with FRESH offer facts for the engine (never cached eligibility). */
+export interface SmartLinkCandidateRow extends OfferCapColumns {
+  offer_id: string;
+  offer_organization_id: string;
+  weight: number;
+  priority: number;
+  /** SQLite boolean: 0 | 1. */
+  enabled: number;
+  offer_status: OfferStatus;
+  offer_access_mode: AccessMode;
+  offer_version_id: string | null;
+  offer_destination_url: string | null;
+  targeting_starts_at: string | null;
+  targeting_ends_at: string | null;
+  grant_status: AccessGrantStatus | null;
+}
+
+export interface TargetingRuleRow {
+  offer_version_id: string;
+  dimension: TargetingDimension;
+  value: string;
 }
 
 export interface ClickRow {
@@ -333,6 +378,7 @@ export class TrackingRepository {
                 o.current_version_id AS offer_version_id,
                 v.destination_url AS offer_destination_url,
                 v.targeting_starts_at, v.targeting_ends_at,
+                v.daily_conversion_cap, v.total_conversion_cap, v.budget_minor, v.currency AS offer_currency,
                 g.status AS grant_status
            FROM tracking_links l
            JOIN offers o ON o.id = l.offer_id
@@ -343,6 +389,64 @@ export class TrackingRepository {
       )
       .bind(code)
       .first<ResolvedTrackingLinkRow>();
+  }
+
+  // ---- smartlinks — public path (Unit 2 over the Unit 3/6 engine) -----------
+
+  /** Resolve a public SmartLink code; null for unknown or non-ACTIVE (same answer, no enumeration). */
+  findActiveSmartLinkByCode(code: string): Promise<ResolvedSmartLinkRow | null> {
+    return this.db
+      .prepare(
+        `SELECT s.id, s.organization_id, s.affiliate_profile_id, s.traffic_source_id, s.code, s.routing_mode,
+                s.status, s.fallback_url
+           FROM smartlinks s
+          WHERE s.code = ? AND s.status = 'ACTIVE'`,
+      )
+      .bind(code)
+      .first<ResolvedSmartLinkRow>();
+  }
+
+  /**
+   * The SmartLink's candidate pool with fresh offer facts + the OWNING
+   * affiliate org's grant per offer. `affiliateOrganizationId` is the
+   * smartlink row's `organization_id` (from D1), never client input.
+   * Disabled rows are returned too so the engine can record WHY they were
+   * rejected (PRD §43 explainable).
+   */
+  async listSmartLinkCandidates(smartlinkId: string, affiliateOrganizationId: string): Promise<SmartLinkCandidateRow[]> {
+    const res = await this.db
+      .prepare(
+        `SELECT so.offer_id, so.offer_organization_id, so.weight, so.priority, so.enabled,
+                o.status AS offer_status, o.access_mode AS offer_access_mode,
+                o.current_version_id AS offer_version_id,
+                v.destination_url AS offer_destination_url,
+                v.targeting_starts_at, v.targeting_ends_at,
+                v.daily_conversion_cap, v.total_conversion_cap, v.budget_minor, v.currency AS offer_currency,
+                g.status AS grant_status
+           FROM smartlink_offers so
+           JOIN offers o ON o.id = so.offer_id
+           LEFT JOIN offer_versions v ON v.id = o.current_version_id
+           LEFT JOIN affiliate_offer_access g
+                  ON g.offer_id = so.offer_id AND g.affiliate_organization_id = ?
+          WHERE so.smartlink_id = ?
+          ORDER BY so.priority ASC, so.weight DESC, so.offer_id ASC`,
+      )
+      .bind(affiliateOrganizationId, smartlinkId)
+      .all<SmartLinkCandidateRow>();
+    return res.results;
+  }
+
+  /** Allow-list targeting rows for a set of CURRENT version ids (one statement; empty input → no query). */
+  async listTargetingForVersions(versionIds: readonly string[]): Promise<TargetingRuleRow[]> {
+    if (versionIds.length === 0) return [];
+    const res = await this.db
+      .prepare(
+        `SELECT offer_version_id, dimension, value FROM offer_version_targeting
+          WHERE offer_version_id IN (${versionIds.map(() => "?").join(", ")})`,
+      )
+      .bind(...versionIds)
+      .all<TargetingRuleRow>();
+    return res.results;
   }
 
   // ---- clicks — INSERT-only ---------------------------------------------------
