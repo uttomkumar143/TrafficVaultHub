@@ -36,6 +36,7 @@ import { AuditRepository } from "../audit/repository";
 import type { AdvertiserRepository } from "../advertisers/repository";
 import type { RequestMeta } from "../auth/repository";
 import type { AuthenticatedContext } from "../auth/service";
+import type { EligibilityCache } from "../tracking/eligibility-cache";
 import type {
   AffiliateOfferAccessRow,
   OfferRepository,
@@ -197,12 +198,56 @@ export interface CreateOfferInput {
 export class OfferService {
   private readonly audit: AuditRepository;
 
+  /**
+   * @param cache Optional eligibility cache (Phase 3 Unit 5). When present,
+   *   every write that can change an offer's routability invalidates the
+   *   cache BEFORE and AFTER the D1 write (see `invalidatingOffer` /
+   *   `invalidatingGrant`). Absent in Phase 2 tests and when the CACHE
+   *   binding is not configured — then there is nothing stale to serve.
+   */
   constructor(
     private readonly repo: OfferRepository,
     private readonly advertisers: AdvertiserRepository,
     db: D1Database,
+    private readonly cache?: EligibilityCache,
   ) {
     this.audit = new AuditRepository(db);
+  }
+
+  // ---- eligibility cache hooks (Phase 3 Unit 5b) -----------------------------
+
+  /**
+   * Public hook for the redirect / SmartLink path (Unit 2): drop the cached
+   * routing facts of an offer whose cap or budget just became exhausted
+   * (`CapDecision.newly_exhausted`) or whose tracking was degraded, so the
+   * next click re-reads D1. Throws `EligibilityCacheError` on failure — the
+   * caller decides how to fail closed. No-op without a cache.
+   */
+  async invalidateOfferRouting(offerId: string): Promise<void> {
+    if (this.cache) await this.cache.invalidateOffer(offerId);
+  }
+
+  /**
+   * Run `write` bracketed by offer-level invalidation. Pre-write failure →
+   * the write never happens; post-write failure → the error surfaces (the
+   * caller never reports success while a stale entry may exist). Both throws
+   * are `EligibilityCacheError` (→ 500 at the edge), never swallowed.
+   */
+  private async invalidatingOffer<T>(offerId: string, write: () => Promise<T>): Promise<T> {
+    if (!this.cache) return write();
+    await this.cache.invalidateOffer(offerId);
+    const result = await write();
+    await this.cache.invalidateOffer(offerId);
+    return result;
+  }
+
+  /** Same bracket for a per-(offer, affiliate org) grant change. */
+  private async invalidatingGrant<T>(offerId: string, affiliateOrgId: string, write: () => Promise<T>): Promise<T> {
+    if (!this.cache) return write();
+    await this.cache.invalidateGrant(offerId, affiliateOrgId);
+    const result = await write();
+    await this.cache.invalidateGrant(offerId, affiliateOrgId);
+    return result;
   }
 
   // ---- tenant (advertiser/owner) reads -------------------------------------
@@ -340,17 +385,24 @@ export class OfferService {
     }
     const changed = (["name", "vertical", "description", "access_mode"] as const).filter((k) => patch[k] !== undefined);
     if (changed.length > 0) {
-      await this.repo.updateFields(tid, offerId, patch, [
-        this.audit.statement({
-          organization_id: tenant.organization.id,
-          actor_user_id: ctx.user.id,
-          action: "offer.updated",
-          target_type: "offer",
-          target_id: offerId,
-          metadata: { fields: changed },
-          meta,
-        }),
-      ]);
+      const write = () =>
+        this.repo.updateFields(tid, offerId, patch, [
+          this.audit.statement({
+            organization_id: tenant.organization.id,
+            actor_user_id: ctx.user.id,
+            action: "offer.updated",
+            target_type: "offer",
+            target_id: offerId,
+            metadata: { fields: changed },
+            meta,
+          }),
+        ]);
+      // access_mode is a routing fact (cached); name/vertical/description are not.
+      if (patch.access_mode !== undefined && patch.access_mode !== before.access_mode) {
+        await this.invalidatingOffer(offerId, write);
+      } else {
+        await write();
+      }
     }
     return this.tenantView(tenant, await this.requireTenantOffer(tenant, offerId));
   }
@@ -379,11 +431,14 @@ export class OfferService {
     const versions = await this.repo.listVersions(tid, offerId);
     const nextNumber = versions.reduce((m, v) => Math.max(m, v.version_number), 0) + 1;
     const versionId = crypto.randomUUID();
-    await this.repo.insertVersion(
-      tid,
-      { id: versionId, offer_id: offerId, version_number: nextNumber, created_by_user_id: ctx.user.id, ...input },
-      normalizeTargeting(targeting).map((t) => ({ id: crypto.randomUUID(), ...t })),
-      [this.versionAudit(tenant, ctx.user.id, offerId, versionId, nextNumber, meta)],
+    // A new version moves current_version_id and may change the destination → routing facts change.
+    await this.invalidatingOffer(offerId, () =>
+      this.repo.insertVersion(
+        tid,
+        { id: versionId, offer_id: offerId, version_number: nextNumber, created_by_user_id: ctx.user.id, ...input },
+        normalizeTargeting(targeting).map((t) => ({ id: crypto.randomUUID(), ...t })),
+        [this.versionAudit(tenant, ctx.user.id, offerId, versionId, nextNumber, meta)],
+      ),
     );
     const v = await this.repo.findVersion(tid, versionId);
     if (!v) throw new Error("version vanished after insert");
@@ -466,21 +521,23 @@ export class OfferService {
     }
     const id = existing?.id ?? crypto.randomUUID();
     const reason = input.reason?.trim() || null;
-    await this.repo.upsertAccessGrant(
-      tid,
-      offerId,
-      { id, affiliate_organization_id: input.affiliate_organization_id, status, reason, actor_user_id: ctx.user.id },
-      [
-        this.audit.statement({
-          organization_id: tenant.organization.id,
-          actor_user_id: ctx.user.id,
-          action: "offer.access_grant_set",
-          target_type: "affiliate_offer_access",
-          target_id: id,
-          metadata: { offer_id: offerId, affiliate_organization_id: input.affiliate_organization_id, status },
-          meta,
-        }),
-      ],
+    await this.invalidatingGrant(offerId, input.affiliate_organization_id, () =>
+      this.repo.upsertAccessGrant(
+        tid,
+        offerId,
+        { id, affiliate_organization_id: input.affiliate_organization_id, status, reason, actor_user_id: ctx.user.id },
+        [
+          this.audit.statement({
+            organization_id: tenant.organization.id,
+            actor_user_id: ctx.user.id,
+            action: "offer.access_grant_set",
+            target_type: "affiliate_offer_access",
+            target_id: id,
+            metadata: { offer_id: offerId, affiliate_organization_id: input.affiliate_organization_id, status },
+            meta,
+          }),
+        ],
+      ),
     );
     const grant = await this.repo.findAccessGrant(tid, offerId, input.affiliate_organization_id);
     if (!grant) throw new Error("access grant vanished after upsert");
@@ -636,19 +693,21 @@ export class OfferService {
     const existing = await this.repo.findMyAccessGrant(offerId, affId);
     if (existing && existing.status === "APPROVED") return toAccessGrant(existing);
     const id = existing?.id ?? crypto.randomUUID();
-    await this.repo.requestAccess(
-      { id, offer_id: offerId, owner_organization_id: row.organization_id, affiliate_organization_id: affId },
-      [
-        this.audit.statement({
-          organization_id: row.organization_id,
-          actor_user_id: ctx.user.id,
-          action: "offer.access_requested",
-          target_type: "affiliate_offer_access",
-          target_id: id,
-          metadata: { offer_id: offerId, affiliate_organization_id: affId },
-          meta,
-        }),
-      ],
+    await this.invalidatingGrant(offerId, affId, () =>
+      this.repo.requestAccess(
+        { id, offer_id: offerId, owner_organization_id: row.organization_id, affiliate_organization_id: affId },
+        [
+          this.audit.statement({
+            organization_id: row.organization_id,
+            actor_user_id: ctx.user.id,
+            action: "offer.access_requested",
+            target_type: "affiliate_offer_access",
+            target_id: id,
+            metadata: { offer_id: offerId, affiliate_organization_id: affId },
+            meta,
+          }),
+        ],
+      ),
     );
     const grant = await this.repo.findMyAccessGrant(offerId, affId);
     if (!grant) throw new Error("access grant vanished after request");
@@ -684,20 +743,25 @@ export class OfferService {
     reviewNotes: string | null | undefined,
     meta: RequestMeta,
   ): Promise<void> {
-    await this.repo.applyTransition(
-      { id: offer.id, organization_id: offer.organization_id },
-      { from: offer.status, to, actor_user_id: actorUserId, actor_kind: actor, reason, request_id: meta.request_id, review_notes: reviewNotes },
-      [
-        this.audit.statement({
-          organization_id: offer.organization_id,
-          actor_user_id: actorUserId,
-          action: "offer.status_changed",
-          target_type: "offer",
-          target_id: offer.id,
-          metadata: { from: offer.status, to, actor_kind: actor, reason },
-          meta,
-        }),
-      ],
+    // Every status change is a routing-fact change (LIVE → PAUSED/COMPLIANCE_HOLD/
+    // ARCHIVED/... must stop traffic immediately), so the whole transition is
+    // bracketed by invalidation. Fails closed on cache errors.
+    await this.invalidatingOffer(offer.id, () =>
+      this.repo.applyTransition(
+        { id: offer.id, organization_id: offer.organization_id },
+        { from: offer.status, to, actor_user_id: actorUserId, actor_kind: actor, reason, request_id: meta.request_id, review_notes: reviewNotes },
+        [
+          this.audit.statement({
+            organization_id: offer.organization_id,
+            actor_user_id: actorUserId,
+            action: "offer.status_changed",
+            target_type: "offer",
+            target_id: offer.id,
+            metadata: { from: offer.status, to, actor_kind: actor, reason },
+            meta,
+          }),
+        ],
+      ),
     );
   }
 
