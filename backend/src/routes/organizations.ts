@@ -45,6 +45,7 @@ import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
 import { marketplaceRoutes, offerReviewRoutes, offerRoutes } from "./offers";
 import { attributionPolicyRoutes, attributionRoutes, conversionRoutes, postbackSecretRoutes } from "./attribution";
 import { conversionHoldRoutes, conversionLifecycleRoutes } from "./conversions";
+import { complianceRoutes } from "./compliance";
 import { fraudRoutes } from "./fraud";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 
@@ -123,6 +124,9 @@ organizationRoutes.route("/:orgId/attributions", attributionRoutes);
 // Phase 4 Unit 10b — fraud cases / assessments / actions over FraudService
 // (risk scores are evidence, never a verdict; conversion lifecycle untouched).
 organizationRoutes.route("/:orgId/fraud", fraudRoutes);
+// Phase 4 Unit 10c — compliance rules / evaluations / cases over ComplianceService
+// (fail-safe: INSUFFICIENT_INFORMATION is never PASS; RESOLVED only via /resolve).
+organizationRoutes.route("/:orgId/compliance", complianceRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);
