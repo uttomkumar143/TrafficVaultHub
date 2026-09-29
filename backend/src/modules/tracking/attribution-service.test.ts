@@ -354,6 +354,45 @@ describe("processPostback", () => {
     expect(dRow.conversion.status).toBe("REJECTED");
   });
 
+  it("duplicate postback creates no duplicate conversion or downstream effect", async () => {
+    // Definition of Done (Phase 4): the replayed postback leaves exactly ONE conversion, ONE attribution,
+    // ONE idempotency key, and no history / hold / reversal rows — nothing downstream fires twice.
+    const issued = await issueSecret();
+    click(db, "clk-1", "2026-03-15T11:00:00.000Z");
+    const first = await svc.processPostback(await signed(issued, baseBody()));
+    expect(first.decision).toBe("ATTRIBUTED");
+    const snapshot = () => ({
+      conversions: db.sqlite.prepare(`SELECT COUNT(*) AS n FROM conversions`).get(),
+      attributions: db.sqlite.prepare(`SELECT COUNT(*) AS n FROM attributions`).get(),
+      history: db.sqlite.prepare(`SELECT COUNT(*) AS n FROM conversion_status_history`).get(),
+      holds: db.sqlite.prepare(`SELECT COUNT(*) AS n FROM conversion_holds`).get(),
+      reversals: db.sqlite.prepare(`SELECT COUNT(*) AS n FROM conversion_reversals`).get(),
+      keys: db.sqlite.prepare(`SELECT COUNT(*) AS n FROM conversions WHERE idempotency_key IS NOT NULL`).get(),
+    });
+    const before = snapshot();
+    expect(before).toEqual({
+      conversions: { n: 1 },
+      attributions: { n: 1 },
+      history: { n: 0 },
+      holds: { n: 0 },
+      reversals: { n: 0 },
+      keys: { n: 1 },
+    });
+    const row = db.sqlite.prepare(`SELECT lifecycle_status, idempotency_key FROM conversions WHERE id = ?`).get(first.conversion_id) as {
+      lifecycle_status: string;
+      idempotency_key: string;
+    };
+    expect(row.lifecycle_status).toBe("PENDING");
+    expect(row.idempotency_key).toBe(`${OFFER}|external_conversion_id|ext-1`);
+
+    // Same postback again (fresh nonce/timestamp — a real advertiser retry, not a replay).
+    for (let i = 0; i < 2; i++) {
+      const again = await svc.processPostback(await signed(issued, baseBody()));
+      expect(again).toMatchObject({ decision: "DUPLICATE", duplicate: true, conversion_id: first.conversion_id, attribution_id: null });
+    }
+    expect(snapshot()).toEqual(before);
+  });
+
   it("never trusts the body for tenant or affiliate: foreign offer → 404, foreign click → CLICK_OFFER_MISMATCH, no click → fallback", async () => {
     const issued = await issueSecret();
     // Offer owned by another advertiser is invisible to this key.

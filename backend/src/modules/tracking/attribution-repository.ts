@@ -107,6 +107,13 @@ export interface ConversionInsert {
   currency: string | null;
   occurred_at: string;
   request_id: string | null;
+  /**
+   * Phase 4 Unit 4 (0009): dedup identity of the canonical record —
+   * `offer_id|column|value` from `dedupKey()`; NULL for evidence rows written
+   * for a DUPLICATE decision so the partial UNIQUE (organization_id,
+   * idempotency_key) only ever holds the first record.
+   */
+  idempotency_key: string | null;
 }
 
 // ---- attributions -------------------------------------------------------------
@@ -376,8 +383,9 @@ export class AttributionRepository {
           .prepare(
             `INSERT INTO conversions
                (organization_id, id, offer_id, offer_version_id, click_id, affiliate_organization_id, external_conversion_id,
-                transaction_id, event_id, conversion_event, status, source, sale_amount_minor, currency, occurred_at, request_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                transaction_id, event_id, conversion_event, status, source, sale_amount_minor, currency, occurred_at, request_id,
+                lifecycle_status, idempotency_key)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             advertiserOrganizationId,
@@ -396,6 +404,8 @@ export class AttributionRepository {
             conversion.currency,
             conversion.occurred_at,
             conversion.request_id,
+            conversion.status,
+            conversion.idempotency_key,
           ),
         this.db
           .prepare(

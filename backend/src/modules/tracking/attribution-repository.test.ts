@@ -64,6 +64,7 @@ const conversion = (over: Partial<ConversionInsert> = {}): ConversionInsert => (
   currency: "USD",
   occurred_at: T0,
   request_id: null,
+  idempotency_key: null,
   ...over,
 });
 

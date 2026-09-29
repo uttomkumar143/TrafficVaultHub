@@ -590,6 +590,8 @@ export class AttributionService {
           currency: body.currency,
           occurred_at: body.occurred_at,
           request_id: req.meta.request_id,
+          // Canonical records carry the dedup identity; DUPLICATE evidence rows do not (partial UNIQUE, 0009).
+          idempotency_key: key && result.decision !== "DUPLICATE" ? `${offer.id}|${key.column}|${key.value}` : null,
         },
         {
           id: attributionId,
