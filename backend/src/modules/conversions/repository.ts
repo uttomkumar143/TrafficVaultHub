@@ -217,7 +217,7 @@ export class ConversionRepository {
   async listHistory(tenantId: TenantId, conversionId: string): Promise<StatusHistoryRow[]> {
     const res = await scopedQuery(
       this.db,
-      `SELECT * FROM conversion_status_history WHERE organization_id = ? AND conversion_id = ? ORDER BY created_at ASC, id ASC`,
+      `SELECT * FROM conversion_status_history WHERE organization_id = ? AND conversion_id = ? ORDER BY created_at ASC, rowid ASC`,
       tenantId,
       conversionId,
     ).all<StatusHistoryRow>();
