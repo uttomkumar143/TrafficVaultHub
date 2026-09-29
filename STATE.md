@@ -3,9 +3,10 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
-**Phase 3 — Tracking, Attribution & SmartLinks** (`06-PHASE3-TRACKING-SMARTLINKS-ATTRIBUTION.md`),
-started Session 9 (2026-09-27), instructed by the user. Unit 8 (migration) landed FIRST at
-`453da7c` because every other unit needs the schema; see "Phase 3 — unit status" below.
+**Phase 3 — Tracking, Attribution & SmartLinks** (`06-PHASE3-TRACKING-SMARTLINKS-ATTRIBUTION.md`)
+is **COMPLETE, all 10 units, as of `61fdeaa` (2026-09-29, Session 25)**; see "Phase 3 — unit
+status" and "Phase 3 verification — 2026-09-29" below. Do not redo it.
+**Phase 4 (`07-…`) is NOT STARTED** — wait for the user's instruction.
 
 Phase 2 — Advertisers, Affiliates, Offers & Marketplace (`05-PHASE2-OFFERS-MARKETPLACE.md`)
 is **COMPLETE, all 10 units, as of `d73756b` (2026-09-26)**; see "Phase 2 — unit status" and
@@ -15,16 +16,28 @@ is **COMPLETE, all 10 units, as of `d73756b` (2026-09-26)**; see "Phase 2 — un
 
 | Unit | Scope | Status |
 |------|-------|--------|
-| 1 | Click ID & tracking links (module + routes) | NOT STARTED |
-| 2 | Public tracking redirect endpoint (`/t/:code`, p95 < 100ms, queue for non-critical) | NOT STARTED |
-| 3 | SmartLink engine (eligibility + 6 routing modes, algorithm version recorded) | NOT STARTED |
-| 4 | Cap protection (Durable Object counters → `offer_cap_counters` snapshot) | NOT STARTED |
-| 5 | KV cache + invalidation (pause / cap / budget / tracking / access revoked / compliance) | NOT STARTED |
-| 6 | Failover (re-evaluate, alternative offer, never an inactive one) | NOT STARTED |
-| 7 | Attribution engine (windows, dedup, S2S postback HMAC + nonce replay guard, PRD §36 record) | NOT STARTED |
-| 8 | Migration `0008_tracking.sql` | **COMPLETE** — `453da7c`. 10 tables: `tracking_links`, `smartlinks`, `smartlink_offers`, `clicks`, `conversions`, `attributions`, `attribution_policies`, `offer_cap_counters`, `postback_nonces`, `advertiser_postback_secrets`; keys `tracking.read/manage`, `attribution.read/manage` (…1101–1104) + grants; `PERMISSION_KEYS` extended; `d1-sqlite.test.ts` + `rbac.test.ts` grant assertions updated; `migrations/README.md` rows 0005–0008 |
-| 9 | Critical tracking tests (PRD §115: unique click id, invalid offer rejected, inactive offer never routed, dedup, invalid signature, replay, attribution recorded) | NOT STARTED |
-| 10 | STATE.md | this update |
+| 1 | Click ID & tracking links (module + routes) | **COMPLETE** — `f6a641c` ids.ts + repository.ts, `f57100b` service.ts, `ea341fb` routes/tracking.ts (`trackingLinkRoutes` + `offerClickRoutes` under `/:orgId`), `bcfa3d0` `src/test/tracking.test.ts` |
+| 2 | Public tracking redirect endpoint (`/t/:code`, `/s/:code`) | **COMPLETE** — `f8ea365` public-path reads, `5ce051b` signals.ts (coarse PRD §34 signals, salted hashes via `CLICK_SIGNAL_SALT`), `b096f05` redirect.ts (RedirectService), `e4d7225` routes/redirect.ts mounted at the ROOT outside `/api/v1` + `src/test/redirect.test.ts` |
+| 3 | SmartLink engine (eligibility + routing modes, algorithm version recorded) | **COMPLETE** — `12f4793` smartlink-engine.ts (+ `cb36493` noUncheckedIndexedAccess fix); eligibility.ts shared with Unit 1 |
+| 4 | Cap protection (Durable Object counters → `offer_cap_counters` snapshot) | **COMPLETE** — `ffa5cff` caps.ts, `0ca3e76` cap-store.ts, `3baf865` cap-object.ts, `e464f05` cap-ledger.ts (DurableCapLedger over `COORDINATOR`), `31584f5` CoordinatorObject = per-offer cap DO |
+| 5 | KV cache + invalidation | **COMPLETE** — `373102f` eligibility-cache.ts, `e1dcd1d` OfferService hooks (every status transition / cap exhaustion invalidates), `641785e` wired over the `CACHE` binding (optional) |
+| 6 | Failover (re-evaluate, alternative offer, never an inactive one) | **COMPLETE** — inside `12f4793` (`failover()` in smartlink-engine.ts, exercised by redirect.ts bounded failover on cap denial) |
+| 7 | Attribution engine + S2S postback | **COMPLETE** — `1999e24` attribution.ts (pure `decide()`), `65404cd` postback-auth.ts (HMAC-SHA-256 envelope `X-TVH-Timestamp/Nonce/Key-Id/Signature`, AES-256-GCM secret vault under `POSTBACK_SECRET_KEY`), `4b337db` attribution-repository.ts, `aa8e230` attribution-service.ts, `61fdeaa` routes/attribution.ts (tenant routes under `/:orgId` + public `POST /postback/v1/conversions` at the ROOT) + `src/test/attribution.test.ts` |
+| 8 | Migration `0008_tracking.sql` | **COMPLETE** — `453da7c`. 10 tables: `tracking_links`, `smartlinks`, `smartlink_offers`, `clicks`, `conversions`, `attributions`, `attribution_policies`, `offer_cap_counters`, `postback_nonces`, `advertiser_postback_secrets`; keys `tracking.read/manage`, `attribution.read/manage` (…1101–1104) + grants |
+| 9 | Critical tracking tests (PRD §115) | **COMPLETE — audit Session 25, no gap found**: unique click id (`ids.test.ts` 10 000-sample set + `redirect.test.ts` "two clicks → two distinct click ids"); invalid offer rejected (`tracking.test.ts` 404 ungranted PRIVATE / 409 PAUSED+DRAFT; `redirect.test.ts` generic 404 for non-LIVE); inactive offer never gets SmartLink traffic incl. failover (`smartlink-engine.test.ts` ×4, `redirect.test.ts` HTTP ×2); duplicate conversions deduplicated (`attribution-service.test.ts`, `attribution.test.ts` DUPLICATE + single row); invalid signature rejected (`postback-auth.test.ts`, service + HTTP 401 tampered/unknown key/swapped body); replay rejected (service + HTTP 409 REPLAY_DETECTED); attribution recorded correctly (service + HTTP: attributions row with click_id / affiliate org / rule_version FK) |
+| 10 | STATE.md + docs/CHECKLIST.md | this update (Session 25) |
+
+Public entry points added in Phase 3 (all outside `/api/v1` and outside session auth):
+`GET /t/:code`, `GET /s/:code` (302 + `Cache-Control: no-store`, generic 404),
+`POST /postback/v1/conversions` (HMAC over raw body; 401 / 409 / 404 / 400 / 503 fail-closed).
+Worker secrets introduced: `CLICK_SIGNAL_SALT` (optional), `POSTBACK_SECRET_KEY` (base64url 32 bytes;
+absent ⇒ secret issuance and postback verification return 503 `POSTBACK_VAULT_UNAVAILABLE`).
+
+## Phase 3 verification — 2026-09-29 (Session 25, at `61fdeaa`)
+- `npm run typecheck` exit 0 · `npx vitest run` **362/362** (34 files) · `npm run build` exit 0
+- `bash scripts/secret-scan.sh` → CLEAN (209 files)
+- `wrangler d1 migrations apply trafficvaulthub-db --local` from empty state → 0001–0008 all ✅
+- `git push origin main` OK; `HEAD == origin/main == 61fdeaa`
 
 Schema decisions baked into 0008 that later units MUST honour:
 - `clicks` is INSERT-only; `clicks.id` IS the `click_id`; exactly one of `tracking_link_id`/`smartlink_id`
@@ -39,8 +52,8 @@ Schema decisions baked into 0008 that later units MUST honour:
 - `postback_nonces` PK `(organization_id, nonce)` IS the replay check (atomic insert-or-fail).
 - `advertiser_postback_secrets.secret_ciphertext` = HMAC key encrypted at rest (AES-GCM under a Worker
   master key named by `key_version`); plaintext returned once at creation, never SELECTed by list/read
-  routes, never logged; `secret_hint` = last 4 chars. Needs a `POSTBACK_SECRET_MASTER_KEY` Worker secret
-  (`.dev.vars.example` placeholder only) when Unit 7 lands.
+  routes, never logged; `secret_hint` = last 4 chars. Implemented in Unit 7 as the `POSTBACK_SECRET_KEY` Worker secret
+  (`key_version` = `POSTBACK_SECRET_KEY:v1`; `.dev.vars.example` documents it).
 - `offer_cap_counters` is the durable snapshot the Durable Object flushes to; `period_key` =
   `YYYY-MM-DD` / `YYYY-MM` / `TOTAL`; `exhausted_at` set once → KV invalidation trigger (Unit 5).
 
@@ -161,25 +174,18 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 3 Unit 8 — `migrations/0008_tracking.sql` (`453da7c`, Session 10). Session 9 drafted it
-but its sandbox (and the uncommitted draft) was lost; Session 10 rebuilt it from the Phase 3
-spec + PRD §31–§46/§115/§129–130, extended `PERMISSION_KEYS`, updated the `d1-sqlite.test.ts`
-table/permission/VIEWER parity lists and the `rbac.test.ts` VIEWER exact set (+ ownership-split
-assertions), added README rows 0005–0008. Verified: backend vitest **153/153** (17 files),
-typecheck PASS, secret scan CLEAN (173 files), push OK, `HEAD == origin/main`.
+Phase 3 Unit 7e + 9 + 10 — `61fdeaa` (Session 25): `routes/attribution.ts` (tenant attribution
+policy / postback-secret / conversion / attribution routes + public `POST /postback/v1/conversions`),
+wiring in `app.ts` / `routes/organizations.ts`, `POSTBACK_SECRET_KEY` binding, `src/test/attribution.test.ts`
+(7 HTTP tests). Unit 9 audit found every PRD §115 item already covered (see table). Verified:
+typecheck 0, vitest **362/362**, build 0, secret scan CLEAN, migrations 0001–0008 apply, `HEAD == origin/main`.
 
 ## Next Planned Unit
-**Phase 3 Unit 1 — Click ID & tracking links**: `backend/src/modules/tracking/{repository,
-service}.ts` + `routes/tracking.ts` mounted at `/api/v1/organizations/:orgId/tracking-links`
-(affiliate tenant; `requireAuth → requireOrg → requirePermission("tracking.read"|"tracking.manage")`),
-`click_id` = `crypto.randomUUID()`, public `code` = 10-char base32 from `crypto.getRandomValues`
-(UNIQUE retry), create requires an APPROVED grant or PUBLIC access on a LIVE offer (reuse
-`OfferService` access resolution), sub1–5 trimmed/≤255/no PII validation, list via
-`lib/pagination.ts`, `lib/request-meta.ts` for audit. Add `trackingService` to `Variables` +
-`wireServices`. Then Unit 2 (public `/t/:code` — minimal path, KV lookup, DO cap check, one
-click INSERT, `EVENTS_QUEUE` for enrichment, 302). Unit order after that: 3 → 4 → 5 → 6 → 7 → 9.
-Carry-over items that are NOT Phase 3 blockers: PLATFORM-org bootstrap path (Phase 9),
-placeholder Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval.
+**None in Phase 3 — Phase 3 is COMPLETE.** Phase 4 (`07-PHASE4-…`, conversions state machine /
+validation / fraud / compliance) is NOT STARTED and must not begin without the user's instruction.
+Carry-over items that are NOT blockers: PLATFORM-org bootstrap path (Phase 9), placeholder
+Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval, `EVENTS_QUEUE` enrichment
+consumer (redirect currently records the coarse signals inline; queue binding unused).
 
 ## Open Questions / Blockers
 - Device metadata limited to `ip_address` + `user_agent` (PRD §12 satisfied at that level).
@@ -255,8 +261,7 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-09-27 — Session 10. Phase 3 started (user instruction, Session 9). Session 9's uncommitted
-Unit 8 draft was NOT present in the sandbox (`git status` clean at `b71cb2a`); rebuilt and
-committed as `453da7c`. Backend vitest 153/153, typecheck PASS, secret scan CLEAN, push OK.
-Frontend not touched this session (no frontend change in Unit 8). Phase 3: 1/10 units
-(Unit 8) COMPLETE; next is Unit 1.
+2026-09-29 — Session 25. Fresh sandbox; resumed from `aa8e230` (355/355). Wrote Unit 7e
+(`61fdeaa`), audited Unit 9 (no missing §115 tests), updated STATE.md + docs/CHECKLIST.md (Unit 10).
+Phase 3: 10/10 units COMPLETE. Backend vitest 362/362, typecheck PASS, build PASS, secret scan
+CLEAN, migrations 0001–0008 apply locally, push OK, `HEAD == origin/main`. Phase 4 NOT STARTED.

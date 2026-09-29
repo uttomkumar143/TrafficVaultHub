@@ -127,20 +127,22 @@ Phase 1 DoD: (1) sign up → verify → log in → session scoped to org + role 
 | 2.9 | Tests: version immutability, access modes, cross-tenant marketplace | NOT STARTED | — | — | depends on 2.4–2.7 |
 | 2.10 | STATE.md | NOT STARTED | — | — | — |
 
-## Phase 3 — Tracking, SmartLinks, Attribution (`06-…`) — 0/10
+## Phase 3 — Tracking, SmartLinks, Attribution (`06-…`) — 10/10 COMPLETE (`61fdeaa`, 2026-09-29)
 
 | Unit | Requirement | Status |
 |------|-------------|--------|
-| 3.1 | Click ID & tracking links (§31–§33) | NOT STARTED |
-| 3.2 | Public tracking redirect endpoint (§129, §130) | NOT STARTED |
-| 3.3 | SmartLink engine (§42, §43) | NOT STARTED |
-| 3.4 | Cap protection — Durable Objects (§44) | NOT STARTED |
-| 3.5 | Cache & invalidation — KV (§45) | NOT STARTED |
-| 3.6 | Failover (§46, §133) | NOT STARTED |
-| 3.7 | Attribution engine (§35, §36) | NOT STARTED |
-| 3.8 | Migration | NOT STARTED |
-| 3.9 | Critical tracking tests (§115) | NOT STARTED |
-| 3.10 | STATE.md | NOT STARTED |
+| 3.1 | Click ID & tracking links (§31–§33) | COMPLETE — `f6a641c`, `f57100b`, `ea341fb`, `bcfa3d0` |
+| 3.2 | Public tracking redirect endpoint (§129, §130) | COMPLETE — `f8ea365`, `5ce051b`, `b096f05`, `e4d7225` (`GET /t/:code`, `GET /s/:code` at the root) |
+| 3.3 | SmartLink engine (§42, §43) | COMPLETE — `12f4793` (+ `cb36493`) |
+| 3.4 | Cap protection — Durable Objects (§44) | COMPLETE — `ffa5cff`, `0ca3e76`, `3baf865`, `e464f05`, `31584f5` |
+| 3.5 | Cache & invalidation — KV (§45) | COMPLETE — `373102f`, `e1dcd1d`, `641785e` |
+| 3.6 | Failover (§46, §133) | COMPLETE — in `12f4793` (`failover()`), used by `b096f05` |
+| 3.7 | Attribution engine (§35, §36) + S2S postback (§74) | COMPLETE — `1999e24`, `65404cd`, `4b337db`, `aa8e230`, `61fdeaa` (`POST /postback/v1/conversions`) |
+| 3.8 | Migration `0008_tracking.sql` | COMPLETE — `453da7c` |
+| 3.9 | Critical tracking tests (§115) | COMPLETE — audited Session 25: all seven items covered by existing unit + HTTP tests (see STATE.md table); no additions needed |
+| 3.10 | STATE.md | COMPLETE — Session 25 |
+
+Verification at `61fdeaa`: typecheck 0 · vitest 362/362 (34 files) · build 0 · secret scan CLEAN · migrations 0001–0008 apply locally · `HEAD == origin/main`.
 
 ## Phase 4 — Conversions, Fraud, Compliance (`07-…`) — 0/11
 
