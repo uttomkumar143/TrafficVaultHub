@@ -24,7 +24,18 @@ describe("test D1 shim", () => {
       "auth_events",
       "auth_tokens",
       "clicks",
+      "compliance_case_events",
+      "compliance_cases",
+      "compliance_evaluations",
+      "compliance_rules",
+      "conversion_holds",
+      "conversion_reversals",
+      "conversion_status_history",
       "conversions",
+      "fraud_actions",
+      "fraud_assessments",
+      "fraud_case_events",
+      "fraud_cases",
       "offer_cap_counters",
       "offer_status_transitions",
       "offer_version_targeting",
@@ -34,6 +45,8 @@ describe("test D1 shim", () => {
       "organizations",
       "permissions",
       "postback_nonces",
+      "reconciliation_cases",
+      "reconciliation_runs",
       "role_org_types",
       "role_permissions",
       "roles",
@@ -67,11 +80,7 @@ describe("test D1 shim", () => {
       "SUPPORT_AGENT",
       "VIEWER",
     ]);
-    expect(roles.results.filter((r) => r.is_owner === 1).map((r) => r.key)).toEqual([
-      "ADVERTISER_OWNER",
-      "AFFILIATE_OWNER",
-      "SUPER_ADMIN",
-    ]);
+    expect(roles.results.filter((r) => r.is_owner === 1).map((r) => r.key)).toEqual(["ADVERTISER_OWNER", "AFFILIATE_OWNER", "SUPER_ADMIN"]);
 
     // Exactly one owner role per organization type.
     const owners = await db
@@ -103,11 +112,14 @@ describe("test D1 shim", () => {
       "attribution.manage",
       "attribution.read",
       "audit.read",
+      "compliance.manage",
       "compliance.read",
       "compliance.resolve",
       "conversions.approve",
       "conversions.read",
       "conversions.reject",
+      "conversions.reverse",
+      "fraud.manage",
       "fraud.read",
       "fraud.review",
       "ledger.adjust",
@@ -125,6 +137,8 @@ describe("test D1 shim", () => {
       "payouts.read",
       "payouts.release",
       "payouts.review",
+      "reconciliation.manage",
+      "reconciliation.read",
       "tracking.manage",
       "tracking.read",
     ]);
@@ -178,6 +192,13 @@ describe("test D1 shim", () => {
     expect(byRole.get("ADVERTISER_OWNER")).not.toEqual(expect.arrayContaining(["tracking.manage"]));
     expect(byRole.get("BILLING_MANAGER")).not.toEqual(expect.arrayContaining(["attribution.manage"]));
 
+    // 0009: advertisers may reverse own conversions and read reconciliation; only platform roles manage fraud/compliance/reconciliation.
+    expect(byRole.get("ADVERTISER_OWNER")).toEqual(expect.arrayContaining(["conversions.reverse", "reconciliation.read"]));
+    expect(byRole.get("ADVERTISER_OWNER")).not.toEqual(expect.arrayContaining(["reconciliation.manage"]));
+    expect(byRole.get("AFFILIATE_OWNER")!.filter((k) => k.startsWith("reconciliation.") || k === "conversions.reverse")).toEqual([]);
+    expect(byRole.get("COMPLIANCE_MANAGER")).toEqual(expect.arrayContaining(["fraud.manage", "compliance.manage"]));
+    expect(byRole.get("FINANCE_MANAGER")).toEqual(expect.arrayContaining(["conversions.reverse", "reconciliation.manage"]));
+
     // Network-only powers never reach tenant roles (PRD §11 separation of duties).
     const networkOnly = [
       "offers.approve",
@@ -188,19 +209,22 @@ describe("test D1 shim", () => {
       "fraud.review",
       "advertisers.review",
       "affiliates.review",
+      "fraud.manage",
+      "compliance.manage",
+      "reconciliation.manage",
     ];
     for (const [role, keys] of byRole) {
       if (["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_MANAGER", "COMPLIANCE_MANAGER"].includes(role)) continue;
-      expect(keys.filter((k) => networkOnly.includes(k)), role).toEqual([]);
+      expect(
+        keys.filter((k) => networkOnly.includes(k)),
+        role,
+      ).toEqual([]);
     }
   });
 
   it("supports bind/first/run and enforces schema constraints", async () => {
     db = createTestD1();
-    const ins = await db
-      .prepare("INSERT INTO users (id, email) VALUES (?, ?)")
-      .bind("u1", "a@example.com")
-      .run();
+    const ins = await db.prepare("INSERT INTO users (id, email) VALUES (?, ?)").bind("u1", "a@example.com").run();
     expect(ins.meta.changes).toBe(1);
 
     const row = await db.prepare("SELECT email, mfa_enabled FROM users WHERE id = ?").bind("u1").first<{
@@ -210,8 +234,6 @@ describe("test D1 shim", () => {
     expect(row).toEqual({ email: "a@example.com", mfa_enabled: 0 });
 
     // unique index on lower(email)
-    await expect(
-      db.prepare("INSERT INTO users (id, email) VALUES (?, ?)").bind("u2", "A@EXAMPLE.COM").run(),
-    ).rejects.toThrow();
+    await expect(db.prepare("INSERT INTO users (id, email) VALUES (?, ?)").bind("u2", "A@EXAMPLE.COM").run()).rejects.toThrow();
   });
 });

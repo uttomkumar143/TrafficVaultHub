@@ -53,6 +53,12 @@ export const PERMISSION_KEYS = [
   "tracking.manage",
   "attribution.read",
   "attribution.manage",
+  // conversions lifecycle / fraud / compliance / reconciliation (Phase 4 Unit 1, migration 0009)
+  "conversions.reverse",
+  "fraud.manage",
+  "compliance.manage",
+  "reconciliation.read",
+  "reconciliation.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
