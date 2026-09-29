@@ -27,6 +27,9 @@
  *   /:orgId/platform/offers(/*)         → routes/offers.ts       offerReviewRoutes       (Phase 2 Unit 3, PLATFORM org)
  *   /:orgId/tracking-links(/*)          → routes/tracking.ts     trackingLinkRoutes      (Phase 3 Unit 1, affiliate)
  *   /:orgId/offers/:offerId/clicks      → routes/tracking.ts     offerClickRoutes        (Phase 3 Unit 1, advertiser)
+ *   /:orgId/conversions/lifecycle, /:orgId/conversions/:id/{lifecycle,approve,reject,dispute,fraud-review,reverse}
+ *                                       → routes/conversions.ts  conversionLifecycleRoutes (Phase 4 Unit 10a, advertiser)
+ *   /:orgId/conversion-holds(/*)        → routes/conversions.ts  conversionHoldRoutes    (Phase 4 Unit 10a, advertiser)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -41,6 +44,7 @@ import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
 import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
 import { marketplaceRoutes, offerReviewRoutes, offerRoutes } from "./offers";
 import { attributionPolicyRoutes, attributionRoutes, conversionRoutes, postbackSecretRoutes } from "./attribution";
+import { conversionHoldRoutes, conversionLifecycleRoutes } from "./conversions";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 
 const nameSchema = z.string().trim().min(2).max(120);
@@ -106,7 +110,14 @@ organizationRoutes.route("/:orgId/offers", offerClickRoutes);
 // from every path in `offerRoutes` / `offerClickRoutes`.
 organizationRoutes.route("/:orgId/offers", attributionPolicyRoutes);
 organizationRoutes.route("/:orgId/postback-secrets", postbackSecretRoutes);
+// Phase 4 Unit 10a — conversion lifecycle shares the `/conversions` prefix.
+// Mounted FIRST so the literal `/lifecycle` segment is matched before the
+// attribution router's `/:conversionId`; every other Phase 4 path is a POST
+// sub-resource the Phase 3 router never defines. No route reaches the
+// internal money-pipeline states (LEDGER_POSTED/EARNED/PAYOUT_ELIGIBLE/PAID).
+organizationRoutes.route("/:orgId/conversions", conversionLifecycleRoutes);
 organizationRoutes.route("/:orgId/conversions", conversionRoutes);
+organizationRoutes.route("/:orgId/conversion-holds", conversionHoldRoutes);
 organizationRoutes.route("/:orgId/attributions", attributionRoutes);
 
 organizationRoutes.post("/", async (c) => {
