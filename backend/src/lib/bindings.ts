@@ -25,6 +25,13 @@ export interface Bindings {
    * subsequent hash; existing rows are not rewritten.
    */
   CLICK_SIGNAL_SALT?: string;
+  /**
+   * Phase 3 Unit 7 — AES-256-GCM master key (base64url, 32 bytes) wrapping
+   * every advertiser postback secret at rest (PRD §74, §115). Optional at the
+   * type level only: when absent, secret create/rotate and postback
+   * verification fail CLOSED with 503 POSTBACK_VAULT_UNAVAILABLE.
+   */
+  POSTBACK_SECRET_KEY?: string;
 
   // Cloudflare resources (placeholders in Phase 0 — see wrangler.jsonc)
   DB: D1Database;

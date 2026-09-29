@@ -10,3 +10,8 @@
 # Phase 3 Unit 2 — salt for the click row's ip_hash / user_agent_hash (PRD §34).
 # Optional: without it those columns stay NULL. Production: `wrangler secret put CLICK_SIGNAL_SALT`.
 # CLICK_SIGNAL_SALT=replace-with-32-random-bytes
+
+# Phase 3 Unit 7 — master key wrapping advertiser postback secrets at rest (AES-256-GCM).
+# base64url of 32 random bytes. Without it, secret issuance and postback verification fail CLOSED (503).
+# Production: `wrangler secret put POSTBACK_SECRET_KEY`. Generate: `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`
+# POSTBACK_SECRET_KEY=replace-with-base64url-32-random-bytes

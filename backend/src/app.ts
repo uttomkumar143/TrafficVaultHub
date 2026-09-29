@@ -15,6 +15,7 @@ import { OrganizationService } from "./modules/organizations/service";
 import { EligibilityCache } from "./modules/tracking/eligibility-cache";
 import { TrackingRepository } from "./modules/tracking/repository";
 import { TrackingService } from "./modules/tracking/service";
+import { postbackRoutes } from "./routes/attribution";
 import { authRoutes } from "./routes/auth";
 import { healthRoutes } from "./routes/health";
 import { organizationRoutes } from "./routes/organizations";
@@ -78,18 +79,10 @@ export function createApp(options: CreateAppOptions = {}) {
     // without the binding (tests, misconfigured env) there is no cache and
     // therefore nothing stale to invalidate — the redirect reads D1 directly.
     const eligibilityCache = c.env.CACHE ? new EligibilityCache(c.env.CACHE) : undefined;
-    c.set(
-      "offerService",
-      new OfferService(new OfferRepository(c.env.DB), new AdvertiserRepository(c.env.DB), c.env.DB, eligibilityCache),
-    );
+    c.set("offerService", new OfferService(new OfferRepository(c.env.DB), new AdvertiserRepository(c.env.DB), c.env.DB, eligibilityCache));
     c.set(
       "trackingService",
-      new TrackingService(
-        new TrackingRepository(c.env.DB),
-        new AffiliateRepository(c.env.DB),
-        new OfferRepository(c.env.DB),
-        c.env.DB,
-      ),
+      new TrackingService(new TrackingRepository(c.env.DB), new AffiliateRepository(c.env.DB), new OfferRepository(c.env.DB), c.env.DB),
     );
     await next();
   };
@@ -109,6 +102,11 @@ export function createApp(options: CreateAppOptions = {}) {
   // Deliberately OUTSIDE /api/v1 and outside `wireServices` / auth — they
   // build their own minimal dependencies per request (hot path, PRD §107).
   app.route("/", redirectRoutes(options.redirect));
+
+  // Public S2S postback (Phase 3 Unit 7e): POST /postback/v1/conversions.
+  // Same placement as the redirects: outside /api/v1 and outside session auth
+  // — the HMAC envelope over the raw body IS the authentication (PRD §74).
+  app.route("/", postbackRoutes());
 
   return app;
 }

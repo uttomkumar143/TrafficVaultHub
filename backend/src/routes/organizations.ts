@@ -40,6 +40,7 @@ import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
 import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
 import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
 import { marketplaceRoutes, offerReviewRoutes, offerRoutes } from "./offers";
+import { attributionPolicyRoutes, attributionRoutes, conversionRoutes, postbackSecretRoutes } from "./attribution";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 
 const nameSchema = z.string().trim().min(2).max(120);
@@ -51,7 +52,11 @@ const slugSchema = z
   .max(64)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "slug must be lowercase letters, digits and single hyphens");
 /** PRD §9 role keys are UPPER_SNAKE_CASE identifiers. */
-const roleKeySchema = z.string().trim().toUpperCase().regex(/^[A-Z][A-Z_]{1,63}$/);
+const roleKeySchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z][A-Z_]{1,63}$/);
 const idSchema = z.string().uuid();
 
 const createSchema = z.object({
@@ -95,6 +100,14 @@ organizationRoutes.route("/:orgId/platform/offers", offerReviewRoutes);
 // there is no overlap and the mount order does not matter.
 organizationRoutes.route("/:orgId/tracking-links", trackingLinkRoutes);
 organizationRoutes.route("/:orgId/offers", offerClickRoutes);
+
+// Phase 3 Unit 7e — attribution. `attributionPolicyRoutes` also shares the
+// `/offers` prefix (`/:offerId/attribution-policy[/versions]`), again disjoint
+// from every path in `offerRoutes` / `offerClickRoutes`.
+organizationRoutes.route("/:orgId/offers", attributionPolicyRoutes);
+organizationRoutes.route("/:orgId/postback-secrets", postbackSecretRoutes);
+organizationRoutes.route("/:orgId/conversions", conversionRoutes);
+organizationRoutes.route("/:orgId/attributions", attributionRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);
@@ -154,9 +167,7 @@ organizationRoutes.post("/:orgId/members", requirePermission("members.manage"), 
 
 organizationRoutes.patch("/:orgId/members/:memberId", requirePermission("members.manage"), async (c) => {
   const body = await parseJsonBody(c, changeRoleSchema);
-  const member = await c
-    .get("organizationService")
-    .changeMemberRole(c.get("auth"), c.get("tenant"), memberId(c), body, meta(c));
+  const member = await c.get("organizationService").changeMemberRole(c.get("auth"), c.get("tenant"), memberId(c), body, meta(c));
   return c.json({ member }, 200);
 });
 
