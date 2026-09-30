@@ -554,9 +554,10 @@ export class LedgerRepository {
       .bind(id, e.organization_id, e.operation, e.reference_type, e.reference_id, e.reason_code, e.detail ?? null, e.request_id ?? null);
   }
 
-  async recordProcessingError(e: ProcessingErrorInsert): Promise<string> {
+  /** Writes the processing error (+ caller extras such as an audit row) in one batch. Never touches ledger tables. */
+  async recordProcessingError(e: ProcessingErrorInsert, extra: readonly D1PreparedStatement[] = []): Promise<string> {
     const id = crypto.randomUUID();
-    await this.processingErrorStatement(e, id).run();
+    await this.db.batch([this.processingErrorStatement(e, id), ...extra]);
     return id;
   }
 
