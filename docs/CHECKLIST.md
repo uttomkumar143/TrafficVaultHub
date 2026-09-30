@@ -144,23 +144,27 @@ Phase 1 DoD: (1) sign up → verify → log in → session scoped to org + role 
 
 Verification at `61fdeaa`: typecheck 0 · vitest 362/362 (34 files) · build 0 · secret scan CLEAN · migrations 0001–0008 apply locally · `HEAD == origin/main`.
 
-## Phase 4 — Conversions, Fraud, Compliance (`07-…`) — 0/11
+## Phase 4 — Conversions, Fraud, Compliance (`07-…`) — 11/11 COMPLETE (code `40e0213`, docs Session 38, 2026-09-30)
 
 | Unit | Requirement | Status |
 |------|-------------|--------|
-| 4.1 | Conversion state machine (§37) | NOT STARTED |
-| 4.2 | Conversion validation (§38) | NOT STARTED |
-| 4.3 | Deduplication (§39) | NOT STARTED |
-| 4.4 | Reconciliation (§40) | NOT STARTED |
-| 4.5 | Reversal (§41) | NOT STARTED |
-| 4.6 | Fraud: risk engine (§47–§49) | NOT STARTED |
-| 4.7 | Fraud: evidence & actions (§50–§52) | NOT STARTED |
-| 4.8 | Compliance (§53–§55) | NOT STARTED |
-| 4.9 | Migration | NOT STARTED |
-| 4.10 | Critical financial-adjacent tests | NOT STARTED |
-| 4.11 | STATE.md | NOT STARTED |
+| 4.1 | Conversion state machine (§37) | DONE — `e553314` `modules/conversions/state-machine.ts` + `state-machine.test.ts` (5); service `a703bb7` + `service.test.ts` (7); HTTP `cd0b685` + `src/test/conversions-http.test.ts` (6: invalid edges 409 `INVALID_TRANSITION`, no generic transition route) |
+| 4.2 | Conversion validation (§38) | DONE — `5f3bb34` `modules/conversions/validation.ts` + `validation.test.ts` (6) |
+| 4.3 | Deduplication (§39) | DONE — `5fe6ef0` (`idempotency_key`); `modules/tracking/attribution-service.test.ts` "duplicate postback creates no duplicate conversion or downstream effect" |
+| 4.4 | Reconciliation (§40) | DONE (service level) — `2387f78` `modules/reconciliation/service.ts` + `4b33c54` `service.test.ts` (7). Scope note: no HTTP routes, no `scheduled()` wiring, ledger side `NOT_AVAILABLE` (see known gaps in STATE.md) |
+| 4.5 | Reversal (§41) | DONE — in `a703bb7` (`reverse()` + `conversion_reversals`); `modules/conversions/service.test.ts` "reversal keeps original and creates compensating record"; HTTP `POST /:id/reverse` in `cd0b685` (`conversions-http.test.ts`: original row kept, second reverse 409) |
+| 4.6 | Fraud: risk engine (§47–§49) | DONE — `4676194` `modules/fraud/risk-engine.ts` + `risk-engine.test.ts` (6); assessments over HTTP `533704e` + `bb204e9` (`fraud-http.test.ts`: assessment never changes `lifecycle_status`) |
+| 4.7 | Fraud: evidence & actions (§50–§52) | DONE — `7860988` repository + `repository.test.ts` (3); `c38a352` `modules/fraud/service.ts` + `service.test.ts` (5); routes `533704e` + `bb204e9` (`src/test/fraud-http.test.ts`, 5). Scope note: `ACCOUNT_RESTRICTION` / `ACCOUNT_SUSPENSION` recorded only, `organizations.status` not mutated |
+| 4.8 | Compliance (§53–§55) | DONE — `d94495c` `modules/compliance/rules.ts` + `rules.test.ts` (4); `2687bda` repository + `repository.test.ts` (3); `becd5bf` `service.ts` + `b718216` `service.test.ts` (4); routes `0493286` + `40e0213` (`src/test/compliance-http.test.ts`, 5) |
+| 4.9 | Migration | DONE — `a9d4a15` `migrations/0009_conversions_fraud_compliance.sql` + `conversions.* / fraud.* / compliance.* / reconciliation.*` permission keys and grants; 0001–0009 apply from empty (verified Session 37) |
+| 4.10 | Critical financial-adjacent tests | DONE — every DoD item pinned to an existing test (grep-confirmed Session 38): `conversions/service.test.ts` "reversal keeps original and creates compensating record" and "fraud/compliance hold blocks PAYOUT_ELIGIBLE"; `tracking/attribution-service.test.ts` "duplicate postback creates no duplicate conversion or downstream effect"; `fraud/service.test.ts` "fraud action CONVERSION_HOLD/PAYOUT_HOLD creates a conversion hold in the same batch and blocks payout" and "PAYOUT_HOLD and account-level actions require fraud.manage; account actions are recorded only"; `compliance/rules.test.ts` "missing required information yields INSUFFICIENT_INFORMATION, never PASS"; `compliance/service.test.ts` "missing required information yields INSUFFICIENT_INFORMATION (never PASS) and a BLOCKING rule opens a case with a COMPLIANCE_BLOCK hold in the same batch" (payout-block) + "resolving COMPLIANT releases the COMPLIANCE_BLOCK hold in the same batch; …"; `reconciliation/service.test.ts` "the batch is atomic: …" (atomic batch), "a run persists the run row, … ledger_status is NOT_AVAILABLE; …" (ledger NOT_AVAILABLE), "resolveCase: … already-decided or concurrently-decided case → 409 and nothing written" (resolveCase 409); no-HTTP-path-to-ledger-states in all three `*-http.test.ts` |
+| 4.11 | STATE.md | DONE — Session 38 (this commit): STATE.md + this file |
 
-## Phase 5 — Finance, Ledger, Payouts (`08-…`) — 0/12
+Verification (verified Session 37 at `40e0213`; the Session 38 commit is docs-only): typecheck 0 · vitest 434/434 (48 files) · build OK · secret scan CLEAN (238 files) · migrations 0001–0009 apply locally from empty · `HEAD == origin/main`.
+
+Known gaps carried to Phase 5: no ledger; `ACCOUNT_RESTRICTION`/`ACCOUNT_SUSPENSION` recorded only (`organizations.status` unchanged); reconciliation ledger side `NOT_AVAILABLE`; reconciliation has no HTTP routes and no `scheduled()` wiring; HTTP never reaches `LEDGER_POSTED`/`EARNED`/`PAYOUT_ELIGIBLE`/`PAID`.
+
+## Phase 5 — Finance, Ledger, Payouts (`08-…`) — 0/12 NOT STARTED
 
 | Unit | Requirement | Status |
 |------|-------------|--------|

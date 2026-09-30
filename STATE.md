@@ -3,10 +3,82 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
-**Phase 3 — Tracking, Attribution & SmartLinks** (`06-PHASE3-TRACKING-SMARTLINKS-ATTRIBUTION.md`)
+**Phase 4 — Conversions, Fraud & Compliance** (`07-PHASE4-CONVERSIONS-FRAUD-COMPLIANCE.md`)
+is **COMPLETE, all 11 units, as of `40e0213` (code) + this docs commit (2026-09-30, Session 38)**;
+see "Phase 4 — unit status", "Phase 4 verification" and "Phase 4 known gaps" below. Do not redo it.
+**Phase 5 (`08-PHASE5-FINANCE-LEDGER-PAYOUTS.md`) is NOT STARTED** — wait for the user's instruction.
+
+Phase 3 — Tracking, Attribution & SmartLinks (`06-PHASE3-TRACKING-SMARTLINKS-ATTRIBUTION.md`)
 is **COMPLETE, all 10 units, as of `61fdeaa` (2026-09-29, Session 25)**; see "Phase 3 — unit
 status" and "Phase 3 verification — 2026-09-29" below. Do not redo it.
-**Phase 4 (`07-…`) is NOT STARTED** — wait for the user's instruction.
+
+## Phase 4 — unit status
+
+| Unit | Scope | Status |
+|------|-------|--------|
+| P4-1 | Migration `0009_conversions_fraud_compliance.sql` + `conversions.*` / `fraud.*` / `compliance.*` / `reconciliation.*` permission keys + grants | **COMPLETE** — `a9d4a15` (repo-root `migrations/0009_…`; lifecycle CHECK extended to the 12-state machine, `conversion_status_history`, `conversion_reversals`, `conversion_holds`, fraud / compliance / reconciliation tables) |
+| P4-2 | Conversion state machine (`modules/conversions/state-machine.ts`) | **COMPLETE** — `e553314` + `state-machine.test.ts` (5) |
+| P4-3 | Conversion validation (`modules/conversions/validation.ts`) | **COMPLETE** — `5f3bb34` + `validation.test.ts` (6) |
+| P4-4 | Deduplication (`idempotency_key`, duplicate postback → no downstream effect) | **COMPLETE** — `5fe6ef0`; `tracking/attribution-service.test.ts` "duplicate postback creates no duplicate conversion or downstream effect" |
+| P4-5a | `modules/conversions/repository.ts` | **COMPLETE** — `cff2821` + `repository.test.ts` (5) |
+| P4-5b | `modules/conversions/service.ts` (approve / reject / dispute / fraud-review / reverse, holds) | **COMPLETE** — `a703bb7` + `service.test.ts` (7) |
+| P4-6 | Fraud risk engine (`modules/fraud/risk-engine.ts`, pure scoring) | **COMPLETE** — `4676194` + `risk-engine.test.ts` (6) |
+| P4-7a | `modules/fraud/repository.ts` | **COMPLETE** — `7860988` + `repository.test.ts` (3) |
+| P4-7b | `modules/fraud/service.ts` (cases, evidence, actions, assessments) | **COMPLETE** — `c38a352` + `service.test.ts` (5) |
+| P4-8a | Compliance rules (`modules/compliance/rules.ts`, pure evaluation) | **COMPLETE** — `d94495c` + `rules.test.ts` (4) |
+| P4-8b | `modules/compliance/repository.ts` | **COMPLETE** — `2687bda` + `repository.test.ts` (3) |
+| P4-8c | `modules/compliance/service.ts` | **COMPLETE** — `becd5bf` (service) + `b718216` (`service.test.ts`, 4) |
+| P4-9 | Reconciliation (`modules/reconciliation/service.ts`) | **COMPLETE (service only)** — `2387f78` (service) + `4b33c54` (`service.test.ts`, 7). No HTTP routes, no `scheduled()` wiring — see known gaps |
+| P4-10a | `routes/conversions.ts` (lifecycle face under `/organizations/:orgId/conversions`) | **COMPLETE** — `cd0b685` + `src/test/conversions-http.test.ts` (6) |
+| P4-10b | `routes/fraud.ts` (under `/organizations/:orgId/fraud`) | **COMPLETE** — `533704e` (routes) + `bb204e9` (`src/test/fraud-http.test.ts`, 5) |
+| P4-10c | `routes/compliance.ts` (under `/organizations/:orgId/compliance`) | **COMPLETE** — `0493286` (routes) + `40e0213` (`src/test/compliance-http.test.ts`, 5) |
+| P4-11 | STATE.md + docs/CHECKLIST.md | **COMPLETE** — this commit (Session 38) |
+
+Phase 4 added 14 test files / 71 tests (module: conversions 23, fraud 14, compliance 11,
+reconciliation 7; HTTP: conversions 6, fraud 5, compliance 5). No new public entry points and no
+new Worker secrets. All Phase 4 HTTP routes sit under session auth + tenant scoping at
+`/api/v1/organizations/:orgId/{conversions,fraud,compliance}`.
+
+## Phase 4 verification — verified Session 37 at `40e0213` (2026-09-30)
+
+The Session 38 docs commit changes only `STATE.md` and `docs/CHECKLIST.md`; no source, test,
+migration or config file differs from `40e0213`, so these results still apply:
+
+- `npm run typecheck` → 0 errors.
+- `npx vitest run` → **48 files / 434 tests pass**, 0 failed, 0 skipped.
+- `npm run build` → OK.
+- `bash scripts/secret-scan.sh` → CLEAN (238 files scanned).
+- `npx wrangler d1 migrations apply trafficvaulthub-db --local` from an empty `.wrangler` → 0001–0009 apply.
+- `HEAD == origin/main == 40e0213` after push.
+
+Phase 4 Definition-of-Done checks, each pinned to a real test name (grep-confirmed Session 38):
+
+| DoD check | Test (file → `it(...)`) |
+|-----------|-------------------------|
+| Reversal keeps the original conversion row and writes a compensating record | `modules/conversions/service.test.ts` → "reversal keeps original and creates compensating record" |
+| An active fraud / compliance hold blocks `PAYOUT_ELIGIBLE` | `modules/conversions/service.test.ts` → "fraud/compliance hold blocks PAYOUT_ELIGIBLE" |
+| Duplicate postback is deduplicated with no downstream effect | `modules/tracking/attribution-service.test.ts` → "duplicate postback creates no duplicate conversion or downstream effect" |
+| Fraud action creates a conversion hold in the same batch and blocks payout | `modules/fraud/service.test.ts` → "fraud action CONVERSION_HOLD/PAYOUT_HOLD creates a conversion hold in the same batch and blocks payout" |
+| PAYOUT_HOLD / account-level actions need `fraud.manage`; account actions are recorded only | `modules/fraud/service.test.ts` → "PAYOUT_HOLD and account-level actions require fraud.manage; account actions are recorded only" |
+| Missing required facts → `INSUFFICIENT_INFORMATION`, never `PASS` (pure rules) | `modules/compliance/rules.test.ts` → "missing required information yields INSUFFICIENT_INFORMATION, never PASS" |
+| Compliance BLOCKING failure opens a case + `COMPLIANCE_BLOCK` hold (payout blocked) in one batch | `modules/compliance/service.test.ts` → "missing required information yields INSUFFICIENT_INFORMATION (never PASS) and a BLOCKING rule opens a case with a COMPLIANCE_BLOCK hold in the same batch" (hold release on COMPLIANT: "resolving COMPLIANT releases the COMPLIANCE_BLOCK hold in the same batch; NON_COMPLIANT keeps it and only compliance.resolve can release it manually") |
+| Reconciliation run is one atomic batch | `modules/reconciliation/service.test.ts` → "the batch is atomic: a failing statement inside the run batch leaves no run, no cases and no audit" |
+| Reconciliation ledger side reports `NOT_AVAILABLE` (no ledger before Phase 5) | `modules/reconciliation/service.test.ts` → "a run persists the run row, one case per mismatch and the audit row in one batch; ledger_status is NOT_AVAILABLE; permission and input are checked before any write" |
+| `resolveCase` on an already / concurrently decided case → 409, nothing written | `modules/reconciliation/service.test.ts` → "resolveCase: OPEN → RESOLVED \| IGNORED with a reason code, audited; needs reconciliation.manage; already-decided or concurrently-decided case → 409 and nothing written" |
+| No HTTP path reaches `LEDGER_POSTED` / `EARNED` / `PAYOUT_ELIGIBLE` / `PAID` | `src/test/conversions-http.test.ts`, `fraud-http.test.ts`, `compliance-http.test.ts` (candidate paths → 404/403, smuggled state fields → 400, history never holds a ledger state) |
+
+## Phase 4 known gaps (carried into Phase 5 / later)
+
+- **No ledger.** `LEDGER_POSTED`, `EARNED`, `PAYOUT_ELIGIBLE`, `PAID` exist in the state machine and
+  CHECK constraint but are reachable only via `service.internal` (never referenced by any route);
+  the ledger and payout flow is Phase 5 (`08-PHASE5-FINANCE-LEDGER-PAYOUTS.md`).
+- **`ACCOUNT_RESTRICTION` / `ACCOUNT_SUSPENSION` fraud actions are recorded only** — an action row +
+  event + audit is written; `organizations.status` is NOT mutated.
+- **Reconciliation ledger side is `NOT_AVAILABLE`** by construction; `LEDGER_MISMATCH` is never emitted.
+- **Reconciliation has no HTTP routes and no `scheduled()` wiring** — `runScheduled()` exists in the
+  service but nothing in `app.ts` / the Worker export calls it; no cron `triggers` in `wrangler.jsonc`.
+- **HTTP never reaches `LEDGER_POSTED` / `EARNED` / `PAYOUT_ELIGIBLE` / `PAID`** (by design for this
+  phase; proven by the three HTTP test files).
 
 Phase 2 — Advertisers, Affiliates, Offers & Marketplace (`05-PHASE2-OFFERS-MARKETPLACE.md`)
 is **COMPLETE, all 10 units, as of `d73756b` (2026-09-26)**; see "Phase 2 — unit status" and
@@ -174,15 +246,17 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 3 Unit 7e + 9 + 10 — `61fdeaa` (Session 25): `routes/attribution.ts` (tenant attribution
-policy / postback-secret / conversion / attribution routes + public `POST /postback/v1/conversions`),
-wiring in `app.ts` / `routes/organizations.ts`, `POSTBACK_SECRET_KEY` binding, `src/test/attribution.test.ts`
-(7 HTTP tests). Unit 9 audit found every PRD §115 item already covered (see table). Verified:
-typecheck 0, vitest **362/362**, build 0, secret scan CLEAN, migrations 0001–0008 apply, `HEAD == origin/main`.
+Phase 4 Unit 11 (P4-11) — this commit (Session 38): STATE.md + docs/CHECKLIST.md brought up to the
+Phase 4 code state at `40e0213`. Last code unit: P4-10c `0493286` + `40e0213` (Session 37):
+`routes/compliance.ts` + `src/test/compliance-http.test.ts` (5). Verified Session 37 at `40e0213`:
+typecheck 0, vitest **434/434** (48 files), build OK, secret scan CLEAN (238 files),
+migrations 0001–0009 apply, `HEAD == origin/main`.
 
 ## Next Planned Unit
-**None in Phase 3 — Phase 3 is COMPLETE.** Phase 4 (`07-PHASE4-…`, conversions state machine /
-validation / fraud / compliance) is NOT STARTED and must not begin without the user's instruction.
+**None in Phase 4 — Phase 4 is COMPLETE.** Phase 5 (`08-PHASE5-FINANCE-LEDGER-PAYOUTS.md`, ledger /
+earnings / payouts) is NOT STARTED and must not begin without the user's instruction. Phase 4
+known gaps (above) are the natural Phase 5 inputs: ledger posting, payout eligibility, reconciliation
+ledger side, reconciliation HTTP + scheduling.
 Carry-over items that are NOT blockers: PLATFORM-org bootstrap path (Phase 9), placeholder
 Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval, `EVENTS_QUEUE` enrichment
 consumer (redirect currently records the coarse signals inline; queue binding unused).
@@ -261,7 +335,13 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-09-29 — Session 25. Fresh sandbox; resumed from `aa8e230` (355/355). Wrote Unit 7e
-(`61fdeaa`), audited Unit 9 (no missing §115 tests), updated STATE.md + docs/CHECKLIST.md (Unit 10).
-Phase 3: 10/10 units COMPLETE. Backend vitest 362/362, typecheck PASS, build PASS, secret scan
-CLEAN, migrations 0001–0008 apply locally, push OK, `HEAD == origin/main`. Phase 4 NOT STARTED.
+2026-09-30 — Session 38 (docs only). Fresh sandbox; resumed from `40e0213` (HEAD == origin/main).
+Wrote Phase 4 Unit 11: STATE.md + docs/CHECKLIST.md (Phase 4 unit table, verification, DoD → test
+map, known gaps). No source changed. Phase 4: 11/11 units COMPLETE. Results verified Session 37 at
+`40e0213`: vitest 434/434 (48 files), typecheck 0, build OK, secret scan CLEAN (238 files),
+migrations 0001–0009 apply locally. Phase 5 NOT STARTED.
+
+Session log:
+- Session 25 (2026-09-29): Phase 3 complete at `61fdeaa` (362/362).
+- Sessions 26–37 (2026-09-29 → 2026-09-30): Phase 4 code, P4-1 `a9d4a15` → P4-10c `40e0213` (434/434).
+- Session 38 (2026-09-30): Phase 4 Unit 11 docs (this commit).
