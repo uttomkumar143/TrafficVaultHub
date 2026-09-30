@@ -588,13 +588,20 @@ export class InternalConversionOps {
     private readonly now: () => Date,
   ) {}
 
+  /**
+   * APPROVED → LEDGER_POSTED. `extra` statements (journal, legs, commission,
+   * ledger audit) are appended to the transition's db.batch after the audit
+   * row, so the ledger posting and the state transition commit — or roll
+   * back — as one unit.
+   */
   markLedgerPosted(
     tenantId: TenantId,
     conversionId: string,
     reason = "LEDGER_POSTED",
     requestId: string | null = null,
+    extra: readonly D1PreparedStatement[] = [],
   ): Promise<ConversionRecord> {
-    return this.step(tenantId, conversionId, "LEDGER_POSTED", reason, requestId);
+    return this.step(tenantId, conversionId, "LEDGER_POSTED", reason, requestId, extra);
   }
   markEarned(tenantId: TenantId, conversionId: string, reason = "EARNED", requestId: string | null = null): Promise<ConversionRecord> {
     return this.step(tenantId, conversionId, "EARNED", reason, requestId);
@@ -628,8 +635,9 @@ export class InternalConversionOps {
     to: ConversionStatus,
     reason: string,
     requestId: string | null,
+    extra: readonly D1PreparedStatement[] = [],
   ): Promise<ConversionRecord> {
-    return this.apply(tenantId, conversionId, to, "INTERNAL", reason, requestId);
+    return this.apply(tenantId, conversionId, to, "INTERNAL", reason, requestId, extra);
   }
 
   private async apply(
@@ -639,6 +647,7 @@ export class InternalConversionOps {
     actor: ConversionActor,
     reason: string,
     requestId: string | null,
+    extra: readonly D1PreparedStatement[] = [],
   ): Promise<ConversionRecord> {
     const conversion = await this.repo.findById(tenantId, conversionId);
     if (!conversion) throw new AppError(404, "NOT_FOUND", "conversion not found");
@@ -673,6 +682,7 @@ export class InternalConversionOps {
           metadata: { from: conversion.lifecycle_status, to, reason_code: reasonCode, actor },
           meta: { ip_address: null, user_agent: null, request_id: requestId },
         }),
+        ...extra,
       ],
     );
     const after = await this.repo.findById(tenantId, conversionId);
