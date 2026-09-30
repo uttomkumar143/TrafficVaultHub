@@ -222,3 +222,244 @@ function resolveAccount(
   }
   return account;
 }
+
+// ---------------------------------------------------------------------------
+// Balanced journal builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds and validates a balanced journal draft. Throws JournalError /
+ * MoneyError with a stable reason code on the FIRST defect found. Checks, in
+ * order: header fields, idempotency key, each leg (positive integer amount,
+ * direction, memo, account exists / same tenant / OPEN / same currency),
+ * then the double-entry invariants: ≥ 2 legs, both sides present, no account
+ * on both sides, Σdebit == Σcredit, total_minor == Σdebit > 0.
+ */
+export function buildJournal(
+  input: JournalDraftInput,
+  accounts: ReadonlyMap<string, LedgerAccountRef>,
+): JournalDraft {
+  const organization_id = assertNonEmpty(input.organization_id, "JOURNAL_ACCOUNT_TENANT_MISMATCH", "organization_id");
+  if (!(JOURNAL_TYPES as readonly string[]).includes(input.journal_type)) {
+    throw new JournalError("JOURNAL_INVALID_TYPE", `journal_type=${String(input.journal_type)}`);
+  }
+  if (!(REFERENCE_TYPES as readonly string[]).includes(input.reference_type)) {
+    throw new JournalError("JOURNAL_INVALID_REFERENCE_TYPE", `reference_type=${String(input.reference_type)}`);
+  }
+  const reference_id = assertNonEmpty(input.reference_id, "JOURNAL_MISSING_REFERENCE_ID", "reference_id");
+  const currency = assertCurrency(input.currency);
+
+  const key = input.idempotency_key;
+  if (typeof key !== "string" || key.length < IDEMPOTENCY_KEY_MIN || key.length > IDEMPOTENCY_KEY_MAX) {
+    throw new JournalError("JOURNAL_INVALID_IDEMPOTENCY_KEY", `length=${typeof key === "string" ? key.length : "n/a"}`);
+  }
+
+  const isReversalType = Object.values(REVERSAL_OF).includes(input.journal_type);
+  const reverses_journal_id = input.reverses_journal_id ?? null;
+  if (isReversalType !== (reverses_journal_id !== null)) {
+    throw new JournalError("JOURNAL_INVALID_TYPE", `${input.journal_type} requires reverses_journal_id=${isReversalType}`);
+  }
+
+  const description = input.description ?? null;
+  if (description !== null && description.length > MAX_DESCRIPTION) {
+    throw new JournalError("JOURNAL_DESCRIPTION_TOO_LONG", `length=${description.length}`);
+  }
+
+  if (!Array.isArray(input.legs) || input.legs.length === 0) {
+    throw new JournalError("JOURNAL_NO_LEGS");
+  }
+  if (input.legs.length < 2) {
+    throw new JournalError("JOURNAL_TOO_FEW_LEGS", `legs=${input.legs.length}`);
+  }
+
+  const legs: JournalLeg[] = [];
+  const debitAccounts = new Set<string>();
+  const creditAccounts = new Set<string>();
+  input.legs.forEach((raw, entry_index) => {
+    if (raw.direction !== "DEBIT" && raw.direction !== "CREDIT") {
+      throw new JournalError("JOURNAL_LEG_INVALID_DIRECTION", `legs[${entry_index}].direction=${String(raw.direction)}`);
+    }
+    // Leg money: integer, > 0, journal currency. MoneyError codes bubble up.
+    const amount = assertPositive(money(raw.amount_minor, currency));
+    const account_id = assertNonEmpty(raw.account_id, "JOURNAL_ACCOUNT_NOT_FOUND", `legs[${entry_index}].account_id`);
+    resolveAccount(accounts, account_id, organization_id, currency);
+    const memo = raw.memo ?? null;
+    if (memo !== null && memo.length > MAX_MEMO) {
+      throw new JournalError("JOURNAL_MEMO_TOO_LONG", `legs[${entry_index}] length=${memo.length}`);
+    }
+    (raw.direction === "DEBIT" ? debitAccounts : creditAccounts).add(account_id);
+    legs.push(Object.freeze({
+      entry_index,
+      account_id,
+      direction: raw.direction,
+      amount_minor: amount.amount_minor,
+      currency,
+      memo,
+    }));
+  });
+
+  for (const id of debitAccounts) {
+    if (creditAccounts.has(id)) {
+      throw new JournalError("JOURNAL_SAME_ACCOUNT_BOTH_SIDES", `account_id=${id}`);
+    }
+  }
+  const debit = sumSide(legs, "DEBIT");
+  const credit = sumSide(legs, "CREDIT");
+  if (debit === 0n || credit === 0n) {
+    throw new JournalError("JOURNAL_ONE_SIDED", `debit=${debit} credit=${credit}`);
+  }
+  if (debit !== credit) {
+    throw new JournalError("JOURNAL_UNBALANCED", `debit=${debit} credit=${credit}`);
+  }
+  if (debit > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new MoneyError("MONEY_OVERFLOW", `total=${debit}`);
+  }
+
+  return Object.freeze({
+    organization_id,
+    journal_type: input.journal_type,
+    currency,
+    total_minor: Number(debit),
+    reference_type: input.reference_type,
+    reference_id,
+    idempotency_key: key,
+    reverses_journal_id,
+    description,
+    legs: Object.freeze(legs),
+  });
+}
+
+/** Non-throwing variant of buildJournal. */
+export function validateJournal(
+  input: JournalDraftInput,
+  accounts: ReadonlyMap<string, LedgerAccountRef>,
+): LedgerResult<JournalDraft> {
+  return capture(() => buildJournal(input, accounts));
+}
+
+/**
+ * Re-checks the double-entry invariants on an already-built draft or a
+ * journal read back from the DB (defence in depth: a repository must call
+ * this before trusting a row set). Does not need the account map.
+ */
+export function assertBalanced(
+  journal: Pick<JournalDraft, "currency" | "total_minor" | "legs">,
+): void {
+  if (journal.legs.length < 2) throw new JournalError("JOURNAL_TOO_FEW_LEGS", `legs=${journal.legs.length}`);
+  const seen = new Set<number>();
+  for (const leg of journal.legs) {
+    if (!Number.isInteger(leg.entry_index) || leg.entry_index < 0) {
+      throw new JournalError("JOURNAL_LEG_INVALID_INDEX", `entry_index=${String(leg.entry_index)}`);
+    }
+    if (seen.has(leg.entry_index)) throw new JournalError("JOURNAL_LEG_DUPLICATE_INDEX", `entry_index=${leg.entry_index}`);
+    seen.add(leg.entry_index);
+    if (leg.direction !== "DEBIT" && leg.direction !== "CREDIT") {
+      throw new JournalError("JOURNAL_LEG_INVALID_DIRECTION", String(leg.direction));
+    }
+    assertPositive(money(leg.amount_minor, leg.currency));
+    if (leg.currency !== journal.currency) {
+      throw new JournalError("JOURNAL_LEG_CURRENCY_MISMATCH", `${leg.currency} vs ${journal.currency}`);
+    }
+  }
+  const debit = sumSide(journal.legs, "DEBIT");
+  const credit = sumSide(journal.legs, "CREDIT");
+  if (debit === 0n || credit === 0n) throw new JournalError("JOURNAL_ONE_SIDED", `debit=${debit} credit=${credit}`);
+  if (debit !== credit) throw new JournalError("JOURNAL_UNBALANCED", `debit=${debit} credit=${credit}`);
+  assertPositive(money(journal.total_minor, journal.currency));
+  if (BigInt(journal.total_minor) !== debit) {
+    throw new JournalError("JOURNAL_TOTAL_MISMATCH", `total_minor=${journal.total_minor} debit=${debit}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Compensating (reversal) journal builder
+// ---------------------------------------------------------------------------
+
+/** What we need to know about the journal being reversed. */
+export interface PostedJournalRef {
+  readonly id: string;
+  readonly organization_id: string;
+  readonly journal_type: JournalType | string;
+  readonly currency: string;
+  readonly total_minor: number;
+  readonly reverses_journal_id: string | null;
+  /** true when some journal already has reverses_journal_id = this.id */
+  readonly already_reversed: boolean;
+  readonly legs: readonly JournalLeg[];
+}
+
+export interface ReversalInput {
+  readonly original: PostedJournalRef;
+  readonly reference_type: JournalReferenceType;
+  readonly reference_id: string;
+  readonly idempotency_key: string;
+  readonly description?: string | null;
+}
+
+/**
+ * Builds the compensating journal for a posted journal: same tenant, same
+ * currency, same total, every leg mirrored (DEBIT↔CREDIT) in the same order.
+ * A journal can be reversed at most once, a reversal can never be reversed,
+ * and only CONVERSION_COMMISSION / PAYOUT / FUNDING are reversible.
+ */
+export function buildCompensatingJournal(
+  input: ReversalInput,
+  accounts: ReadonlyMap<string, LedgerAccountRef>,
+): JournalDraft {
+  const { original } = input;
+  const reversalType = REVERSAL_OF[original.journal_type as JournalType];
+  if (!reversalType) {
+    throw new JournalError("REVERSAL_NOT_REVERSIBLE_TYPE", `journal_type=${String(original.journal_type)}`);
+  }
+  if (original.reverses_journal_id !== null) {
+    throw new JournalError("REVERSAL_ORIGINAL_IS_REVERSAL", `journal_id=${original.id}`);
+  }
+  if (original.already_reversed) {
+    throw new JournalError("REVERSAL_ALREADY_REVERSED", `journal_id=${original.id}`);
+  }
+  if (!original.legs || original.legs.length === 0) {
+    throw new JournalError("REVERSAL_ORIGINAL_HAS_NO_LEGS", `journal_id=${original.id}`);
+  }
+  assertBalanced(original);
+
+  const draft = buildJournal(
+    {
+      organization_id: original.organization_id,
+      journal_type: reversalType,
+      currency: original.currency,
+      reference_type: input.reference_type,
+      reference_id: input.reference_id,
+      idempotency_key: input.idempotency_key,
+      reverses_journal_id: original.id,
+      description: input.description ?? null,
+      legs: [...original.legs]
+        .sort((a, b) => a.entry_index - b.entry_index)
+        .map((leg) => ({
+          account_id: leg.account_id,
+          direction: leg.direction === "DEBIT" ? "CREDIT" : "DEBIT",
+          amount_minor: leg.amount_minor,
+          memo: leg.memo,
+        })),
+    },
+    accounts,
+  );
+
+  // Belt and braces: the DB trigger enforces these too, but we never rely on it.
+  if (draft.organization_id !== original.organization_id) {
+    throw new JournalError("REVERSAL_TENANT_MISMATCH", `journal_id=${original.id}`);
+  }
+  if (draft.currency !== original.currency) {
+    throw new JournalError("JOURNAL_CURRENCY_MISMATCH", `${draft.currency} vs ${original.currency}`);
+  }
+  if (draft.total_minor !== original.total_minor) {
+    throw new JournalError("JOURNAL_TOTAL_MISMATCH", `${draft.total_minor} vs ${original.total_minor}`);
+  }
+  return draft;
+}
+
+export function validateCompensatingJournal(
+  input: ReversalInput,
+  accounts: ReadonlyMap<string, LedgerAccountRef>,
+): LedgerResult<JournalDraft> {
+  return capture(() => buildCompensatingJournal(input, accounts));
+}
