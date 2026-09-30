@@ -409,12 +409,14 @@ export function buildCompensatingJournal(
   accounts: ReadonlyMap<string, LedgerAccountRef>,
 ): JournalDraft {
   const { original } = input;
+  // A reversal can never itself be reversed — check this before the type map
+  // so the precise reason code wins over the generic "not reversible type".
+  if (original.reverses_journal_id !== null) {
+    throw new JournalError("REVERSAL_ORIGINAL_IS_REVERSAL", `journal_id=${original.id}`);
+  }
   const reversalType = REVERSAL_OF[original.journal_type as JournalType];
   if (!reversalType) {
     throw new JournalError("REVERSAL_NOT_REVERSIBLE_TYPE", `journal_type=${String(original.journal_type)}`);
-  }
-  if (original.reverses_journal_id !== null) {
-    throw new JournalError("REVERSAL_ORIGINAL_IS_REVERSAL", `journal_id=${original.id}`);
   }
   if (original.already_reversed) {
     throw new JournalError("REVERSAL_ALREADY_REVERSED", `journal_id=${original.id}`);
