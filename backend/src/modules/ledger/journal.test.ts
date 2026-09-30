@@ -185,3 +185,106 @@ describe("buildJournal", () => {
     expect(code(() => assertBalanced({ ...j, legs: [j.legs[0]!, { ...j.legs[1]!, amount_minor: -700 }, j.legs[2]!] }))).toBe("MONEY_NEGATIVE");
   });
 });
+
+describe("buildCompensatingJournal", () => {
+  function posted(over: Partial<PostedJournalRef> = {}): PostedJournalRef {
+    const j = buildJournal(draft(), ACCOUNTS);
+    return { id: "j_1", organization_id: j.organization_id, journal_type: j.journal_type, currency: j.currency,
+      total_minor: j.total_minor, reverses_journal_id: null, already_reversed: false, legs: j.legs, ...over };
+  }
+  const rev = (o: PostedJournalRef, accounts = ACCOUNTS) =>
+    buildCompensatingJournal({ original: o, reference_type: "CONVERSION_REVERSAL", reference_id: "conv_1", idempotency_key: "CONVERSION_REVERSAL:conv_1" }, accounts);
+
+  it("mirrors every leg, keeps order/total/currency/tenant, points at the original", () => {
+    const r = rev(posted());
+    expect(r.journal_type).toBe("CONVERSION_REVERSAL");
+    expect(r.reverses_journal_id).toBe("j_1");
+    expect(r.total_minor).toBe(1000);
+    expect(r.currency).toBe("USD");
+    expect(r.organization_id).toBe(ORG);
+    expect(r.legs.map((l) => [l.account_id, l.direction, l.amount_minor])).toEqual([
+      ["a_recv", "CREDIT", 1000], ["a_pay", "DEBIT", 700], ["a_rev", "DEBIT", 300],
+    ]);
+  });
+  it("refuses: already reversed, reversal-of-reversal, non-reversible type, no legs, tampered total", () => {
+    expect(code(() => rev(posted({ already_reversed: true })))).toBe("REVERSAL_ALREADY_REVERSED");
+    expect(code(() => rev(posted({ journal_type: "CONVERSION_REVERSAL", reverses_journal_id: "j_0" })))).toBe("REVERSAL_ORIGINAL_IS_REVERSAL");
+    expect(code(() => rev(posted({ journal_type: "ADJUSTMENT" })))).toBe("REVERSAL_NOT_REVERSIBLE_TYPE");
+    expect(code(() => rev(posted({ legs: [] })))).toBe("REVERSAL_ORIGINAL_HAS_NO_LEGS");
+    expect(code(() => rev(posted({ total_minor: 1 })))).toBe("JOURNAL_TOTAL_MISMATCH");
+  });
+  it("refuses when an account has been CLOSED since the original posting", () => {
+    const closedNow = new Map(ACCOUNTS);
+    closedNow.set("a_pay", acct("a_pay", "AFFILIATE_PAYABLE", "USD", "CLOSED"));
+    expect(code(() => rev(posted(), closedNow))).toBe("JOURNAL_ACCOUNT_CLOSED");
+  });
+});
+
+describe("verifyConversionPosting", () => {
+  const version: PinnedOfferVersion = { id: "v_7", offer_id: "offer_1", organization_id: ORG, payout_type: "CPA",
+    currency: "USD", advertiser_payout_minor: 1000, affiliate_commission_minor: 700, revshare_percent_bps: null };
+  const conv = (over: Partial<ConversionForPosting> = {}): ConversionForPosting => ({
+    id: "conv_1", organization_id: ORG, offer_id: "offer_1", offer_version_id: "v_7", affiliate_organization_id: "org_aff_1",
+    lifecycle_status: "APPROVED", sale_amount_minor: null, currency: null, commission_amount_minor: 700, commission_currency: "USD", ...over });
+  const facts = { already_posted: false, reversed: false };
+
+  it("accepts an APPROVED, unposted conversion whose stored commission equals the pinned version", () => {
+    const c = verifyConversionPosting(conv(), version, facts);
+    expect(c).toMatchObject({ conversion_id: "conv_1", offer_version_id: "v_7", payout_type: "CPA", currency: "USD",
+      affiliate_commission_minor: 700, advertiser_payout_minor: 1000, platform_margin_minor: 300 });
+    const j = buildConversionCommissionJournal(c, ACCOUNTS);
+    expect(j.idempotency_key).toBe("CONVERSION_COMMISSION:conv_1");
+    expect(j.total_minor).toBe(1000);
+    expect(j.legs.map((l) => [l.account_id, l.direction, l.amount_minor])).toEqual([
+      ["a_recv", "DEBIT", 1000], ["a_pay", "CREDIT", 700], ["a_rev", "CREDIT", 300],
+    ]);
+  });
+  it("rejects every lifecycle / dedupe break with a stable code", () => {
+    for (const s of ["PENDING", "HELD", "REJECTED", "REVERSED", "LEDGER_POSTED", "PAID"]) {
+      expect(code(() => verifyConversionPosting(conv({ lifecycle_status: s }), version, facts))).toBe("POSTING_CONVERSION_NOT_APPROVED");
+    }
+    expect(code(() => verifyConversionPosting(conv(), version, { ...facts, reversed: true }))).toBe("POSTING_CONVERSION_REVERSED");
+    expect(code(() => verifyConversionPosting(conv(), version, { ...facts, already_posted: true }))).toBe("POSTING_ALREADY_POSTED");
+    expect(code(() => verifyConversionPosting(conv({ offer_version_id: null }), version, facts))).toBe("POSTING_NO_PINNED_VERSION");
+    expect(code(() => verifyConversionPosting(conv(), null, facts))).toBe("POSTING_VERSION_MISMATCH");
+    expect(code(() => verifyConversionPosting(conv(), { ...version, id: "v_8" }, facts))).toBe("POSTING_VERSION_MISMATCH");
+    expect(code(() => verifyConversionPosting(conv(), { ...version, offer_id: "offer_2" }, facts))).toBe("POSTING_VERSION_MISMATCH");
+    expect(code(() => verifyConversionPosting(conv(), { ...version, organization_id: OTHER_ORG }, facts))).toBe("POSTING_TENANT_MISMATCH");
+    expect(code(() => verifyConversionPosting(conv({ affiliate_organization_id: null }), version, facts))).toBe("POSTING_NO_AFFILIATE");
+  });
+  it("rejects commission mismatch (amount tampered, missing, wrong currency) — pinned version wins", () => {
+    expect(code(() => verifyConversionPosting(conv({ commission_amount_minor: 701 }), version, facts))).toBe("POSTING_COMMISSION_MISMATCH");
+    expect(code(() => verifyConversionPosting(conv({ commission_amount_minor: 699 }), version, facts))).toBe("POSTING_COMMISSION_MISMATCH");
+    expect(code(() => verifyConversionPosting(conv({ commission_amount_minor: null }), version, facts))).toBe("POSTING_COMMISSION_MISSING");
+    expect(code(() => verifyConversionPosting(conv({ commission_currency: "EUR" }), version, facts))).toBe("POSTING_CURRENCY_MISMATCH");
+    expect(code(() => verifyConversionPosting(conv({ commission_amount_minor: -700 }), version, facts))).toBe("MONEY_NEGATIVE");
+    // a "current" version with a higher payout must not be trusted: it is not the pinned one
+    expect(code(() => verifyConversionPosting(conv({ commission_amount_minor: 900 }), { ...version, id: "v_9", affiliate_commission_minor: 900 }, facts))).toBe("POSTING_VERSION_MISMATCH");
+  });
+  it("REVSHARE recomputes floor(sale × bps / 10000), never guesses advertiser/margin", () => {
+    const rs: PinnedOfferVersion = { ...version, payout_type: "REVSHARE", revshare_percent_bps: 3333, advertiser_payout_minor: 0, affiliate_commission_minor: 0 };
+    const c = verifyConversionPosting(conv({ sale_amount_minor: 999, currency: "USD", commission_amount_minor: 332 }), rs, facts);
+    expect(c.affiliate_commission_minor).toBe(332);
+    expect(c.advertiser_payout_minor).toBeNull();
+    expect(c.platform_margin_minor).toBeNull();
+    const j = buildConversionCommissionJournal(c, ACCOUNTS);
+    expect(j.legs.length).toBe(2);
+    expect(j.total_minor).toBe(332);
+    expect(code(() => verifyConversionPosting(conv({ sale_amount_minor: 999, currency: "USD", commission_amount_minor: 333 }), rs, facts))).toBe("POSTING_COMMISSION_MISMATCH");
+    expect(code(() => recomputeCommission(conv({ sale_amount_minor: null }), rs))).toBe("POSTING_REVSHARE_NO_SALE_AMOUNT");
+    expect(code(() => recomputeCommission(conv({ sale_amount_minor: 999, currency: "EUR" }), rs))).toBe("POSTING_CURRENCY_MISMATCH");
+    expect(code(() => recomputeCommission(conv({ sale_amount_minor: 999, currency: "USD" }), { ...rs, revshare_percent_bps: null }))).toBe("POSTING_REVSHARE_NO_BPS");
+    expect(code(() => recomputeCommission(conv({ sale_amount_minor: 1, currency: "USD" }), rs))).toBe("MONEY_NEGATIVE"); // floor → 0 is not a commission
+    expect(code(() => recomputeCommission(conv(), { ...version, payout_type: "CPX" }))).toBe("POSTING_INVALID_PAYOUT_TYPE");
+    expect(code(() => recomputeCommission(conv(), { ...version, advertiser_payout_minor: 699 }))).toBe("POSTING_ADVERTISER_BELOW_COMMISSION");
+  });
+  it("commission journal needs the tenant's accounts in the right currency; captureLedger yields the code", () => {
+    const c = verifyConversionPosting(conv(), version, facts);
+    const noRevenue = new Map(ACCOUNTS); noRevenue.delete("a_rev");
+    expect(code(() => buildConversionCommissionJournal(c, noRevenue))).toBe("POSTING_ACCOUNT_MISSING");
+    const closedPayable = new Map(ACCOUNTS); closedPayable.set("a_pay", acct("a_pay", "AFFILIATE_PAYABLE", "USD", "CLOSED"));
+    expect(captureLedger(() => buildConversionCommissionJournal(c, closedPayable))).toMatchObject({ ok: false, reason_code: "JOURNAL_ACCOUNT_CLOSED" });
+    expect(captureLedger(() => verifyConversionPosting(conv({ commission_currency: "EUR" }), version, facts))).toMatchObject({ ok: false, reason_code: "POSTING_CURRENCY_MISMATCH" });
+    expect(() => captureLedger(() => { throw new TypeError("bug"); })).toThrow(TypeError);
+  });
+});
