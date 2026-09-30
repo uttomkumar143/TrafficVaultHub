@@ -14,9 +14,11 @@
 
 import {
   MoneyError,
+  applyBps,
   assertCurrency,
   assertPositive,
   money,
+  subtract,
   type Money,
   type MoneyReasonCode,
 } from "./money";
@@ -462,4 +464,250 @@ export function validateCompensatingJournal(
   accounts: ReadonlyMap<string, LedgerAccountRef>,
 ): LedgerResult<JournalDraft> {
   return capture(() => buildCompensatingJournal(input, accounts));
+}
+
+// ---------------------------------------------------------------------------
+// Conversion → commission posting verification (§58, §131)
+// ---------------------------------------------------------------------------
+
+export const PAYOUT_TYPES = ["CPA", "CPL", "CPC", "CPI", "CPM", "CPS", "REVSHARE"] as const;
+export type CommissionPayoutType = (typeof PAYOUT_TYPES)[number];
+
+export const POSTING_REASON_CODES = [
+  "POSTING_CONVERSION_NOT_APPROVED",
+  "POSTING_CONVERSION_REVERSED",
+  "POSTING_ALREADY_POSTED",
+  "POSTING_NO_PINNED_VERSION",
+  "POSTING_VERSION_MISMATCH",
+  "POSTING_TENANT_MISMATCH",
+  "POSTING_NO_AFFILIATE",
+  "POSTING_INVALID_PAYOUT_TYPE",
+  "POSTING_COMMISSION_MISSING",
+  "POSTING_COMMISSION_MISMATCH",
+  "POSTING_CURRENCY_MISMATCH",
+  "POSTING_REVSHARE_NO_SALE_AMOUNT",
+  "POSTING_REVSHARE_NO_BPS",
+  "POSTING_ADVERTISER_BELOW_COMMISSION",
+  "POSTING_ACCOUNT_MISSING",
+] as const;
+export type PostingReasonCode = (typeof POSTING_REASON_CODES)[number];
+
+export class PostingError extends Error {
+  readonly reason_code: PostingReasonCode;
+  readonly detail: string | undefined;
+  constructor(reason_code: PostingReasonCode, detail?: string) {
+    super(detail ? `${reason_code}: ${detail}` : reason_code);
+    this.name = "PostingError";
+    this.reason_code = reason_code;
+    this.detail = detail;
+  }
+}
+
+/** Projection of a conversions row (see conversions/repository ConversionRecord). */
+export interface ConversionForPosting {
+  readonly id: string;
+  readonly organization_id: string;
+  readonly offer_id: string;
+  readonly offer_version_id: string | null;
+  readonly affiliate_organization_id: string | null;
+  readonly lifecycle_status: string;
+  readonly sale_amount_minor: number | null;
+  readonly currency: string | null;
+  readonly commission_amount_minor: number | null;
+  readonly commission_currency: string | null;
+}
+
+/** Projection of the offer_versions row pinned at click time (never "current"). */
+export interface PinnedOfferVersion {
+  readonly id: string;
+  readonly offer_id: string;
+  readonly organization_id: string;
+  readonly payout_type: CommissionPayoutType | string;
+  readonly currency: string;
+  readonly advertiser_payout_minor: number;
+  readonly affiliate_commission_minor: number;
+  readonly revshare_percent_bps: number | null;
+}
+
+/** Facts the repository must look up before posting; this module never guesses them. */
+export interface PostingFacts {
+  /** A commissions row or CONVERSION_COMMISSION journal already references this conversion. */
+  readonly already_posted: boolean;
+  /** The conversion has been REVERSED/REJECTED or a CONVERSION_REVERSAL exists for it. */
+  readonly reversed: boolean;
+}
+
+/** Mirrors the commissions table (minus ids/journal). */
+export interface CommissionDraft {
+  readonly conversion_id: string;
+  readonly organization_id: string;
+  readonly affiliate_organization_id: string;
+  readonly offer_id: string;
+  readonly offer_version_id: string;
+  readonly payout_type: CommissionPayoutType;
+  readonly currency: string;
+  readonly affiliate_commission_minor: number;
+  readonly advertiser_payout_minor: number | null;
+  readonly platform_margin_minor: number | null;
+}
+
+/**
+ * Recomputes the affiliate commission strictly from the pinned version:
+ * fixed types → version.affiliate_commission_minor; REVSHARE →
+ * floor(sale_amount × bps / 10000). Returns null advertiser/margin for
+ * REVSHARE (unverifiable, never guessed).
+ */
+export function recomputeCommission(
+  conversion: ConversionForPosting,
+  version: PinnedOfferVersion,
+): Pick<CommissionDraft, "payout_type" | "currency" | "affiliate_commission_minor" | "advertiser_payout_minor" | "platform_margin_minor"> {
+  if (!(PAYOUT_TYPES as readonly string[]).includes(version.payout_type)) {
+    throw new PostingError("POSTING_INVALID_PAYOUT_TYPE", `payout_type=${String(version.payout_type)}`);
+  }
+  const payout_type = version.payout_type as CommissionPayoutType;
+  const currency = assertCurrency(version.currency);
+
+  if (payout_type === "REVSHARE") {
+    if (version.revshare_percent_bps === null || version.revshare_percent_bps === undefined) {
+      throw new PostingError("POSTING_REVSHARE_NO_BPS", `version_id=${version.id}`);
+    }
+    if (conversion.sale_amount_minor === null) {
+      throw new PostingError("POSTING_REVSHARE_NO_SALE_AMOUNT", `conversion_id=${conversion.id}`);
+    }
+    if (conversion.currency !== currency) {
+      throw new PostingError("POSTING_CURRENCY_MISMATCH", `sale ${String(conversion.currency)} vs version ${currency}`);
+    }
+    const share = applyBps(money(conversion.sale_amount_minor, currency), version.revshare_percent_bps);
+    assertPositive(share);
+    return { payout_type, currency, affiliate_commission_minor: share.amount_minor, advertiser_payout_minor: null, platform_margin_minor: null };
+  }
+
+  const commission = assertPositive(money(version.affiliate_commission_minor, currency));
+  const advertiser = money(version.advertiser_payout_minor, currency);
+  if (advertiser.amount_minor < commission.amount_minor) {
+    throw new PostingError("POSTING_ADVERTISER_BELOW_COMMISSION", `${advertiser.amount_minor} < ${commission.amount_minor}`);
+  }
+  return {
+    payout_type,
+    currency,
+    affiliate_commission_minor: commission.amount_minor,
+    advertiser_payout_minor: advertiser.amount_minor,
+    platform_margin_minor: subtract(advertiser, commission).amount_minor,
+  };
+}
+
+/**
+ * Gate for POST_CONVERSION_COMMISSION. Every reject is a stable reason code.
+ * Order: tenant, APPROVED, not reversed, not already posted, pinned version
+ * present and matching (id + offer + tenant), affiliate present, stored
+ * commission present and EQUAL to the recomputed one, currency match.
+ */
+export function verifyConversionPosting(
+  conversion: ConversionForPosting,
+  version: PinnedOfferVersion | null | undefined,
+  facts: PostingFacts,
+): CommissionDraft {
+  if (conversion.lifecycle_status !== "APPROVED") {
+    throw new PostingError("POSTING_CONVERSION_NOT_APPROVED", `lifecycle_status=${conversion.lifecycle_status}`);
+  }
+  if (facts.reversed) throw new PostingError("POSTING_CONVERSION_REVERSED", `conversion_id=${conversion.id}`);
+  if (facts.already_posted) throw new PostingError("POSTING_ALREADY_POSTED", `conversion_id=${conversion.id}`);
+  if (!conversion.offer_version_id) throw new PostingError("POSTING_NO_PINNED_VERSION", `conversion_id=${conversion.id}`);
+  if (!version || version.id !== conversion.offer_version_id || version.offer_id !== conversion.offer_id) {
+    throw new PostingError("POSTING_VERSION_MISMATCH", `expected version ${conversion.offer_version_id} of offer ${conversion.offer_id}`);
+  }
+  if (version.organization_id !== conversion.organization_id) {
+    throw new PostingError("POSTING_TENANT_MISMATCH", `version org ${version.organization_id} vs conversion org ${conversion.organization_id}`);
+  }
+  if (!conversion.affiliate_organization_id) throw new PostingError("POSTING_NO_AFFILIATE", `conversion_id=${conversion.id}`);
+
+  const recomputed = recomputeCommission(conversion, version);
+  if (conversion.commission_amount_minor === null || conversion.commission_currency === null) {
+    throw new PostingError("POSTING_COMMISSION_MISSING", `conversion_id=${conversion.id}`);
+  }
+  if (conversion.commission_currency !== recomputed.currency) {
+    throw new PostingError("POSTING_CURRENCY_MISMATCH", `stored ${conversion.commission_currency} vs version ${recomputed.currency}`);
+  }
+  const stored = money(conversion.commission_amount_minor, conversion.commission_currency);
+  if (stored.amount_minor !== recomputed.affiliate_commission_minor) {
+    throw new PostingError("POSTING_COMMISSION_MISMATCH", `stored ${stored.amount_minor} vs recomputed ${recomputed.affiliate_commission_minor}`);
+  }
+
+  return Object.freeze({
+    conversion_id: conversion.id,
+    organization_id: conversion.organization_id,
+    affiliate_organization_id: conversion.affiliate_organization_id,
+    offer_id: conversion.offer_id,
+    offer_version_id: version.id,
+    ...recomputed,
+  });
+}
+
+export function findAccountByCode(
+  accounts: ReadonlyMap<string, LedgerAccountRef>,
+  organization_id: string,
+  code: AccountCode,
+  currency: string,
+): LedgerAccountRef {
+  for (const account of accounts.values()) {
+    if (account.organization_id === organization_id && account.code === code && account.currency === currency) return account;
+  }
+  throw new PostingError("POSTING_ACCOUNT_MISSING", `${code}/${currency} for org ${organization_id}`);
+}
+
+/**
+ * Journal for a verified commission:
+ *   DEBIT  ADVERTISER_RECEIVABLE  advertiser_payout (or commission for REVSHARE)
+ *   CREDIT AFFILIATE_PAYABLE      affiliate_commission
+ *   CREDIT PLATFORM_REVENUE       margin (only when > 0)
+ * Idempotency key is derived from the conversion id so a retry can never post twice.
+ */
+export function buildConversionCommissionJournal(
+  commission: CommissionDraft,
+  accounts: ReadonlyMap<string, LedgerAccountRef>,
+): JournalDraft {
+  const { organization_id, currency } = commission;
+  const receivable = findAccountByCode(accounts, organization_id, "ADVERTISER_RECEIVABLE", currency);
+  const payable = findAccountByCode(accounts, organization_id, "AFFILIATE_PAYABLE", currency);
+  const debitAmount = commission.advertiser_payout_minor ?? commission.affiliate_commission_minor;
+  const legs: JournalLegInput[] = [
+    { account_id: receivable.id, direction: "DEBIT", amount_minor: debitAmount, memo: `conversion ${commission.conversion_id}` },
+    { account_id: payable.id, direction: "CREDIT", amount_minor: commission.affiliate_commission_minor, memo: `affiliate ${commission.affiliate_organization_id}` },
+  ];
+  if (commission.platform_margin_minor !== null && commission.platform_margin_minor > 0) {
+    const revenue = findAccountByCode(accounts, organization_id, "PLATFORM_REVENUE", currency);
+    legs.push({ account_id: revenue.id, direction: "CREDIT", amount_minor: commission.platform_margin_minor, memo: "platform margin" });
+  }
+  return buildJournal(
+    {
+      organization_id,
+      journal_type: "CONVERSION_COMMISSION",
+      currency,
+      reference_type: "CONVERSION",
+      reference_id: commission.conversion_id,
+      idempotency_key: conversionCommissionIdempotencyKey(commission.conversion_id),
+      legs,
+    },
+    accounts,
+  );
+}
+
+export function conversionCommissionIdempotencyKey(conversion_id: string): string {
+  return `CONVERSION_COMMISSION:${conversion_id}`;
+}
+
+export function conversionReversalIdempotencyKey(conversion_id: string): string {
+  return `CONVERSION_REVERSAL:${conversion_id}`;
+}
+
+/** Non-throwing wrapper covering Money/Journal/Posting errors. */
+export function captureLedger<T>(fn: () => T): { ok: true; value: T } | { ok: false; reason_code: string; detail?: string } {
+  try {
+    return { ok: true, value: fn() };
+  } catch (err) {
+    if (err instanceof PostingError || err instanceof JournalError || err instanceof MoneyError) {
+      return err.detail === undefined ? { ok: false, reason_code: err.reason_code } : { ok: false, reason_code: err.reason_code, detail: err.detail };
+    }
+    throw err;
+  }
 }
