@@ -170,6 +170,11 @@ export interface PostedJournal {
   readonly entry_ids: readonly string[];
 }
 
+/** The statements postJournal() batches, exposed so a caller can place them inside its own batch. */
+export interface JournalStatements extends PostedJournal {
+  readonly statements: readonly D1PreparedStatement[];
+}
+
 // ---------------------------------------------------------------------------
 // DB error classification (D1 / SQLite messages)
 // ---------------------------------------------------------------------------
@@ -273,6 +278,24 @@ export class LedgerRepository {
    * AppError is thrown (see classifyLedgerWriteError).
    */
   async postJournal(draft: JournalDraft, header: JournalHeader, extra: readonly D1PreparedStatement[] = []): Promise<PostedJournal> {
+    const { journal_id, entry_ids, statements } = this.journalStatements(draft, header, extra);
+    try {
+      await this.db.batch([...statements]);
+    } catch (err) {
+      throw classifyLedgerWriteError(err);
+    }
+    return { journal_id, entry_ids };
+  }
+
+  /**
+   * Builds (does NOT run) the statements postJournal() batches: the
+   * journal_entries row, one ledger_entries row per leg, then `extra` in
+   * order. Re-runs assertBalanced() so a tampered draft never produces
+   * statements. Callers that own a larger batch (e.g. the conversion's
+   * guarded LEDGER_POSTED transition) append these to it so journal, legs,
+   * commission, audit and state transition land — or roll back — together.
+   */
+  journalStatements(draft: JournalDraft, header: JournalHeader, extra: readonly D1PreparedStatement[] = []): JournalStatements {
     assertBalanced(draft);
     const journal_id = header.id ?? crypto.randomUUID();
     const entry_ids = draft.legs.map(() => crypto.randomUUID());
@@ -311,13 +334,7 @@ export class LedgerRepository {
       ),
       ...extra,
     ];
-
-    try {
-      await this.db.batch(statements);
-    } catch (err) {
-      throw classifyLedgerWriteError(err);
-    }
-    return { journal_id, entry_ids };
+    return { journal_id, entry_ids, statements };
   }
 
   findJournal(tenantId: TenantId, journalId: string): Promise<JournalRow | null> {
