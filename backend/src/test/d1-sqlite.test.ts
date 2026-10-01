@@ -11,6 +11,8 @@ describe("test D1 shim", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
       .all<{ name: string }>();
     expect(rows.results.map((r) => r.name)).toEqual([
+      "advertiser_billing_profiles",
+      "advertiser_funding_events",
       "advertiser_postback_secrets",
       "advertiser_profiles",
       "advertiser_status_transitions",
@@ -41,6 +43,7 @@ describe("test D1 shim", () => {
       "fraud_assessments",
       "fraud_case_events",
       "fraud_cases",
+      "funding_alerts",
       "journal_entries",
       "ledger_accounts",
       "ledger_entries",
@@ -51,6 +54,10 @@ describe("test D1 shim", () => {
       "offers",
       "organization_members",
       "organizations",
+      "payout_attempts",
+      "payout_methods",
+      "payout_status_history",
+      "payouts",
       "permissions",
       "postback_nonces",
       "reconciliation_cases",
@@ -121,6 +128,8 @@ describe("test D1 shim", () => {
       "attribution.manage",
       "attribution.read",
       "audit.read",
+      "billing.manage",
+      "billing.read",
       "compliance.manage",
       "compliance.read",
       "compliance.resolve",
@@ -147,6 +156,7 @@ describe("test D1 shim", () => {
       "payouts.approve",
       "payouts.read",
       "payouts.release",
+      "payouts.request",
       "payouts.review",
       "reconciliation.manage",
       "reconciliation.read",
@@ -216,6 +226,21 @@ describe("test D1 shim", () => {
     expect(byRole.get("COMPLIANCE_MANAGER")!.filter((k) => k === "ledger.approve" || k === "ledger.reserve")).toEqual([]);
     expect(byRole.get("ADVERTISER_OWNER")!.filter((k) => k.startsWith("ledger."))).toEqual(["ledger.read"]);
     expect(byRole.get("AFFILIATE_OWNER")!.filter((k) => k.startsWith("ledger."))).toEqual(["ledger.read"]);
+    // 0011: billing management is a finance power; advertiser tenants only READ their funding position;
+    // affiliates may REQUEST a payout of their own balance but never review/approve/release one.
+    for (const role of ["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_MANAGER"]) {
+      expect(byRole.get(role), role).toEqual(expect.arrayContaining(["billing.read", "billing.manage", "payouts.request"]));
+    }
+    for (const role of ["ADVERTISER_OWNER", "ADVERTISER_ADMIN", "BILLING_MANAGER"]) {
+      expect(byRole.get(role)!.filter((k) => k.startsWith("billing.")), role).toEqual(["billing.read"]);
+      expect(byRole.get(role)!.filter((k) => k.startsWith("payouts.")), role).toEqual([]);
+    }
+    for (const role of ["AFFILIATE_OWNER", "AFFILIATE_MANAGER"]) {
+      expect(byRole.get(role)!.filter((k) => k.startsWith("payouts.")).sort(), role).toEqual(["payouts.read", "payouts.request"]);
+      expect(byRole.get(role)!.filter((k) => k.startsWith("billing.")), role).toEqual([]);
+    }
+    expect(byRole.get("AFFILIATE_USER")!.filter((k) => k === "payouts.request")).toEqual([]);
+    expect(byRole.get("COMPLIANCE_MANAGER")!.filter((k) => k.startsWith("billing."))).toEqual([]);
 
     // Network-only powers never reach tenant roles (PRD §11 separation of duties).
     const networkOnly = [
@@ -232,6 +257,7 @@ describe("test D1 shim", () => {
       "reconciliation.manage",
       "ledger.approve",
       "ledger.reserve",
+      "billing.manage",
     ];
     for (const [role, keys] of byRole) {
       if (["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_MANAGER", "COMPLIANCE_MANAGER"].includes(role)) continue;
@@ -348,6 +374,137 @@ describe("test D1 shim", () => {
       /RESERVE_ALREADY_RELEASED/,
     );
     await expect(run("DELETE FROM reserves WHERE id = 'res1'")).rejects.toThrow(/RESERVE_IMMUTABLE/);
+  });
+
+  it("applies 0011: billing profiles stay consistent, funding events/alerts/payout history are append-only, payouts are idempotent and final (PRD §62, §65, §66, §114)", async () => {
+    db = createTestD1();
+    const run = (sql: string) => db.prepare(sql).run();
+    db.sqlite.exec(`
+      INSERT INTO users (id, email) VALUES ('u-req', 'req@example.com'), ('u-app', 'app@example.com');
+      INSERT INTO organizations (id, type, name, slug) VALUES ('org-adv', 'ADVERTISER', 'Adv', 'adv'), ('org-aff', 'AFFILIATE', 'Aff', 'aff'),
+        ('org-aff2', 'AFFILIATE', 'Aff2', 'aff2');
+      INSERT INTO advertiser_profiles (id, organization_id, status, company_name) VALUES ('ap1', 'org-adv', 'ACTIVE', 'Adv Co');
+      INSERT INTO affiliate_profiles (id, organization_id, status, display_name) VALUES ('afp1', 'org-aff', 'ACTIVE', 'Aff'),
+        ('afp2', 'org-aff2', 'ACTIVE', 'Aff2');
+    `);
+    // billing profile: available_credit is derived-consistent; PREPAID has no credit limit; POSTPAID needs terms
+    const profile = (id: string, org: string, ap: string, model: string, limit: number, used: number, avail: number, terms: string) =>
+      run(
+        `INSERT INTO advertiser_billing_profiles (id, organization_id, advertiser_profile_id, funding_model, currency, credit_limit_minor, used_credit_minor, available_credit_minor, payment_terms_days)
+         VALUES ('${id}', '${org}', '${ap}', '${model}', 'USD', ${limit}, ${used}, ${avail}, ${terms})`,
+      );
+    await expect(profile("bp-bad", "org-adv", "ap1", "CREDIT", 10000, 2000, 9000, "NULL")).rejects.toThrow(/CHECK/);
+    await expect(profile("bp-bad", "org-adv", "ap1", "PREPAID", 10000, 0, 10000, "NULL")).rejects.toThrow(/CHECK/);
+    await expect(profile("bp-bad", "org-adv", "ap1", "POSTPAID", 10000, 0, 10000, "NULL")).rejects.toThrow(/CHECK/);
+    await profile("bp1", "org-adv", "ap1", "CREDIT", 10000, 2000, 8000, "NULL");
+    await expect(run("UPDATE advertiser_billing_profiles SET used_credit_minor = 5000 WHERE id = 'bp1'")).rejects.toThrow(/CHECK/);
+    await run("UPDATE advertiser_billing_profiles SET used_credit_minor = 5000, available_credit_minor = 5000 WHERE id = 'bp1'");
+    await expect(run("UPDATE advertiser_billing_profiles SET currency = 'EUR' WHERE id = 'bp1'")).rejects.toThrow(/BILLING_PROFILE_IMMUTABLE/);
+    await expect(run("UPDATE advertiser_billing_profiles SET funding_protection_active = 1 WHERE id = 'bp1'")).rejects.toThrow(/CHECK/);
+    await expect(run("DELETE FROM advertiser_billing_profiles WHERE id = 'bp1'")).rejects.toThrow(/BILLING_PROFILE_IMMUTABLE/);
+    // funding events: profile currency only; deposits need an amount; append-only
+    const fe = (id: string, type: string, amount: string, cur: string) =>
+      run(
+        `INSERT INTO advertiser_funding_events (id, billing_profile_id, organization_id, event_type, amount_minor, currency, actor_type)
+         VALUES ('${id}', 'bp1', 'org-adv', '${type}', ${amount}, '${cur}', 'PLATFORM')`,
+      );
+    await expect(fe("fe-eur", "DEPOSIT", "100", "EUR")).rejects.toThrow(/FUNDING_EVENT_CURRENCY_MISMATCH/);
+    await expect(fe("fe-noamt", "DEPOSIT", "NULL", "USD")).rejects.toThrow(/CHECK/);
+    await fe("fe1", "DEPOSIT", "100", "USD");
+    await expect(run("UPDATE advertiser_funding_events SET amount_minor = 1 WHERE id = 'fe1'")).rejects.toThrow(/FUNDING_EVENTS_APPEND_ONLY/);
+    await expect(run("DELETE FROM advertiser_funding_events WHERE id = 'fe1'")).rejects.toThrow(/FUNDING_EVENTS_APPEND_ONLY/);
+    // funding alerts: one per (audience, dedupe_key) — the idempotency of the §62 trigger; only ack is mutable
+    const alert = (id: string, audience: string) =>
+      run(
+        `INSERT INTO funding_alerts (id, organization_id, billing_profile_id, audience, alert_type, severity, dedupe_key, payload)
+         VALUES ('${id}', 'org-adv', 'bp1', '${audience}', 'INSUFFICIENT_CAPACITY', 'CRITICAL', 'cap:bp1:1', '{}')`,
+      );
+    await alert("al-adv", "ADVERTISER");
+    await alert("al-ops", "OPERATIONS");
+    await expect(alert("al-dup", "ADVERTISER")).rejects.toThrow(/UNIQUE/);
+    await expect(run("UPDATE funding_alerts SET payload = '{\"x\":1}' WHERE id = 'al-adv'")).rejects.toThrow(/FUNDING_ALERT_IMMUTABLE/);
+    await expect(run("UPDATE funding_alerts SET acknowledged_at = 'x' WHERE id = 'al-adv'")).rejects.toThrow(/CHECK/);
+    await run("UPDATE funding_alerts SET acknowledged_at = 'x', acknowledged_by_user_id = 'u-app' WHERE id = 'al-adv'");
+    await expect(run("DELETE FROM funding_alerts WHERE id = 'al-adv'")).rejects.toThrow(/FUNDING_ALERT_IMMUTABLE/);
+    // payout methods: default must be VERIFIED and unique per org; token/currency frozen
+    db.sqlite.exec(`
+      INSERT INTO payout_methods (id, organization_id, affiliate_profile_id, method_type, provider, provider_token, display_label, currency, status, verified_at, is_default)
+        VALUES ('pm1', 'org-aff', 'afp1', 'BANK_TRANSFER', 'stub', 'tok-1', 'Bank ••1234', 'USD', 'VERIFIED', '2026-01-01T00:00:00.000Z', 1),
+               ('pm-eur', 'org-aff', 'afp1', 'PAYPAL', 'stub', 'tok-2', 'PayPal', 'EUR', 'VERIFIED', '2026-01-01T00:00:00.000Z', 0),
+               ('pm-other', 'org-aff2', 'afp2', 'WISE', 'stub', 'tok-3', 'Wise', 'USD', 'VERIFIED', '2026-01-01T00:00:00.000Z', 0);
+    `);
+    await expect(
+      run(
+        `INSERT INTO payout_methods (id, organization_id, affiliate_profile_id, method_type, provider, provider_token, display_label, currency, is_default)
+         VALUES ('pm-pending-default', 'org-aff', 'afp1', 'PAYPAL', 'stub', 'tok-9', 'x', 'USD', 1)`,
+      ),
+    ).rejects.toThrow(/CHECK/);
+    await expect(run("UPDATE payout_methods SET is_default = 1 WHERE id = 'pm-eur'")).rejects.toThrow(/UNIQUE/);
+    await expect(run("UPDATE payout_methods SET provider_token = 'tok-x' WHERE id = 'pm1'")).rejects.toThrow(/PAYOUT_METHOD_IMMUTABLE/);
+    await expect(run("DELETE FROM payout_methods WHERE id = 'pm-eur'")).rejects.toThrow(/PAYOUT_METHOD_IMMUTABLE/);
+    // payouts: method guard (org + currency), unique idempotency key, frozen money, legal edges, final states, approver != requester
+    const payout = (id: string, org: string, pm: string, cur: string, key: string) =>
+      run(
+        `INSERT INTO payouts (id, organization_id, payout_method_id, amount_minor, currency, idempotency_key, requested_by_user_id, requested_actor_type)
+         VALUES ('${id}', '${org}', '${pm}', 5000, '${cur}', '${key}', 'u-req', 'TENANT')`,
+      );
+    await expect(payout("p-nomethod", "org-aff", "pm-nope", "USD", "k0")).rejects.toThrow(/PAYOUT_METHOD_MISSING/);
+    await expect(payout("p-xorg", "org-aff", "pm-other", "USD", "k0")).rejects.toThrow(/PAYOUT_METHOD_ORG_MISMATCH/);
+    await expect(payout("p-xcur", "org-aff", "pm-eur", "USD", "k0")).rejects.toThrow(/PAYOUT_METHOD_CURRENCY_MISMATCH/);
+    await payout("p1", "org-aff", "pm1", "USD", "payout:org-aff:2026-03");
+    await expect(payout("p-dup", "org-aff", "pm1", "USD", "payout:org-aff:2026-03")).rejects.toThrow(/UNIQUE/);
+    await expect(run("UPDATE payouts SET amount_minor = 1 WHERE id = 'p1'")).rejects.toThrow(/PAYOUT_IMMUTABLE/);
+    await expect(run("UPDATE payouts SET status = 'PAID', paid_at = 'x' WHERE id = 'p1'")).rejects.toThrow(/PAYOUT_ILLEGAL_TRANSITION|CHECK/);
+    await run("UPDATE payouts SET status = 'ELIGIBILITY_CHECK' WHERE id = 'p1'");
+    await run("UPDATE payouts SET status = 'UNDER_REVIEW' WHERE id = 'p1'");
+    await expect(run("UPDATE payouts SET status = 'APPROVED', approved_by_user_id = 'u-req', approved_at = 'x' WHERE id = 'p1'")).rejects.toThrow(
+      /CHECK/,
+    );
+    await expect(run("UPDATE payouts SET status = 'APPROVED' WHERE id = 'p1'")).rejects.toThrow(/CHECK/);
+    await run("UPDATE payouts SET status = 'APPROVED', approved_by_user_id = 'u-app', approved_at = 'x' WHERE id = 'p1'");
+    await run("UPDATE payouts SET status = 'PROCESSING', provider = 'stub', provider_reference = 'ref-1' WHERE id = 'p1'");
+    await expect(run("UPDATE payouts SET provider_reference = 'ref-2' WHERE id = 'p1'")).rejects.toThrow(/PAYOUT_PROVIDER_REFERENCE_IMMUTABLE/);
+    await run("UPDATE payouts SET status = 'FAILED', failure_code = 'PROVIDER_TIMEOUT' WHERE id = 'p1'");
+    await run("UPDATE payouts SET status = 'PROCESSING' WHERE id = 'p1'");
+    // same provider reference can never belong to a second payout
+    await payout("p2", "org-aff", "pm1", "USD", "payout:org-aff:2026-04");
+    await run("UPDATE payouts SET status = 'ELIGIBILITY_CHECK' WHERE id = 'p2'");
+    await run("UPDATE payouts SET status = 'UNDER_REVIEW' WHERE id = 'p2'");
+    await run("UPDATE payouts SET status = 'APPROVED', approved_by_user_id = 'u-app', approved_at = 'x' WHERE id = 'p2'");
+    await expect(run("UPDATE payouts SET status = 'PROCESSING', provider = 'stub', provider_reference = 'ref-1' WHERE id = 'p2'")).rejects.toThrow(
+      /UNIQUE/,
+    );
+    await run("UPDATE payouts SET status = 'CANCELLED', cancelled_at = 'x' WHERE id = 'p2'");
+    // a terminal row refuses every status change (both the FINAL and the edge trigger guard it) and every other update
+    await expect(run("UPDATE payouts SET status = 'APPROVED' WHERE id = 'p2'")).rejects.toThrow(/PAYOUT_FINAL|PAYOUT_ILLEGAL_TRANSITION/);
+    await expect(run("UPDATE payouts SET cancel_reason = 'late edit' WHERE id = 'p2'")).rejects.toThrow(/PAYOUT_FINAL/);
+    await run("UPDATE payouts SET status = 'PAID', paid_at = 'x' WHERE id = 'p1'");
+    await expect(run("UPDATE payouts SET status = 'PROCESSING', paid_at = NULL WHERE id = 'p1'")).rejects.toThrow(
+      /PAYOUT_FINAL|PAYOUT_ILLEGAL_TRANSITION/,
+    );
+    await expect(run("UPDATE payouts SET updated_at = 'y' WHERE id = 'p1'")).rejects.toThrow(/PAYOUT_FINAL/);
+    await expect(run("DELETE FROM payouts WHERE id = 'p2'")).rejects.toThrow(/PAYOUT_IMMUTABLE/);
+    // history + attempts: append-only; attempt must carry the payout's exact money
+    db.sqlite.exec(`
+      INSERT INTO payout_status_history (id, payout_id, organization_id, from_status, to_status, actor_type)
+        VALUES ('ph1', 'p1', 'org-aff', NULL, 'REQUESTED', 'TENANT');
+      INSERT INTO payout_attempts (id, payout_id, organization_id, attempt_number, provider, provider_idempotency_key, provider_reference, amount_minor, currency, outcome, actor_type)
+        VALUES ('pa1', 'p1', 'org-aff', 1, 'stub', 'p1', 'ref-1', 5000, 'USD', 'SUCCEEDED', 'SYSTEM');
+    `);
+    await expect(run("UPDATE payout_status_history SET to_status = 'PAID' WHERE id = 'ph1'")).rejects.toThrow(/PAYOUT_STATUS_HISTORY_APPEND_ONLY/);
+    await expect(run("DELETE FROM payout_status_history WHERE id = 'ph1'")).rejects.toThrow(/PAYOUT_STATUS_HISTORY_APPEND_ONLY/);
+    await expect(run("UPDATE payout_attempts SET outcome = 'FAILED' WHERE id = 'pa1'")).rejects.toThrow(/PAYOUT_ATTEMPTS_APPEND_ONLY/);
+    await expect(run("DELETE FROM payout_attempts WHERE id = 'pa1'")).rejects.toThrow(/PAYOUT_ATTEMPTS_APPEND_ONLY/);
+    const attempt = (id: string, n: number, amount: number, cur: string, org = "org-aff") =>
+      run(
+        `INSERT INTO payout_attempts (id, payout_id, organization_id, attempt_number, provider, provider_idempotency_key, amount_minor, currency, outcome, error_code, actor_type)
+         VALUES ('${id}', 'p1', '${org}', ${n}, 'stub', 'p1', ${amount}, '${cur}', 'FAILED', 'E', 'SYSTEM')`,
+      );
+    await expect(attempt("pa-dupn", 1, 5000, "USD")).rejects.toThrow(/UNIQUE/);
+    await expect(attempt("pa-amt", 2, 4999, "USD")).rejects.toThrow(/PAYOUT_ATTEMPT_MONEY_MISMATCH/);
+    await expect(attempt("pa-cur", 2, 5000, "EUR")).rejects.toThrow(/PAYOUT_ATTEMPT_MONEY_MISMATCH/);
+    await expect(attempt("pa-org", 2, 5000, "USD", "org-aff2")).rejects.toThrow(/PAYOUT_ATTEMPT_ORG_MISMATCH/);
+    await attempt("pa2", 2, 5000, "USD");
   });
 
   it("supports bind/first/run and enforces schema constraints", async () => {

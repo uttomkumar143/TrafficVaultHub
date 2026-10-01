@@ -62,6 +62,10 @@ export const PERMISSION_KEYS = [
   // ledger separation of duties (Phase 5 Unit 1, migration 0010)
   "ledger.approve",
   "ledger.reserve",
+  // billing & payout requests (Phase 5 Unit 7, migration 0011)
+  "billing.read",
+  "billing.manage",
+  "payouts.request",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
