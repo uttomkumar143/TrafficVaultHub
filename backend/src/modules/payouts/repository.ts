@@ -223,13 +223,15 @@ export function isCheckViolation(err: unknown): boolean {
 }
 
 /**
- * True when the batch failed because the guarded status UPDATE met a stale
- * row: the sentinel either trips the status CHECK or (since BEFORE triggers run
- * first) `trg_payouts_legal_transition` / `trg_payouts_terminal`.
+ * True when the batch failed because the guarded status UPDATE met a stale or
+ * final row: the sentinel trips the `status IN (...)` CHECK or (BEFORE triggers
+ * run first) `trg_payouts_legal_transition` / `trg_payouts_terminal`. Every
+ * other CHECK (money, failure_code, §132 approver, append-only…) is NOT a
+ * conflict and must surface to the caller.
  */
 export function isStateConflict(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return isCheckViolation(err) || /PAYOUT_ILLEGAL_TRANSITION|PAYOUT_FINAL/.test(msg);
+  return /CHECK constraint failed:\s*status IN \(/i.test(msg) || /PAYOUT_ILLEGAL_TRANSITION|PAYOUT_FINAL/.test(msg);
 }
 
 function assertMinor(amount: unknown, field: string): asserts amount is number {
@@ -531,9 +533,9 @@ export class PayoutRepository {
   // ---- mutations -----------------------------------------------------------------------------
 
   /**
-   * Runs statements atomically. A stale status guard (sentinel → CHECK /
+   * Runs statements atomically. A stale status guard (sentinel → status CHECK /
    * transition trigger) is mapped to `false` with nothing written; every other
-   * error (FK, UNIQUE, money mismatch, append-only triggers…) is re-thrown.
+   * error (FK, UNIQUE, row CHECKs, money mismatch, append-only triggers…) is re-thrown.
    */
   async batch(statements: D1PreparedStatement[]): Promise<boolean> {
     try {
