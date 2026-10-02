@@ -322,8 +322,13 @@ export function isCheckViolation(err: unknown): boolean {
 // Ledger side (Phase 5 Unit 15) — pure core over rows the repository loads
 // ---------------------------------------------------------------------------
 
-/** Lifecycle states that MUST carry a commission + posted CONVERSION journal. */
-const LEDGER_BEARING: ReadonlySet<ConversionStatus> = new Set<ConversionStatus>(["LEDGER_POSTED", "EARNED", "PAYOUT_ELIGIBLE", "PAID", "REVERSED"]);
+/**
+ * Lifecycle states that MUST carry a commission + posted CONVERSION journal.
+ * REVERSED is deliberately absent: it is reachable from APPROVED (never posted, no
+ * commission), so a missing commission there is not a mismatch. If a REVERSED
+ * conversion does have a commission, its journal is still checked below.
+ */
+const LEDGER_BEARING: ReadonlySet<ConversionStatus> = new Set<ConversionStatus>(["LEDGER_POSTED", "EARNED", "PAYOUT_ELIGIBLE", "PAID"]);
 /** Lifecycle states that MUST NOT carry a commission yet (posting happens at APPROVED → LEDGER_POSTED). */
 const PRE_POSTING: ReadonlySet<ConversionStatus> = new Set<ConversionStatus>(["RECEIVED", "VALIDATING", "PENDING", "APPROVED", "REJECTED"]);
 
