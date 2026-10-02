@@ -33,6 +33,9 @@
  *   /:orgId/payouts(/*)                 → routes/payouts.ts      payoutRoutes            (Phase 5 Unit 13a, affiliate)
  *   /:orgId/platform/payouts, /:orgId/platform/affiliates/:affiliateOrgId/payouts(/*)
  *                                       → routes/payouts.ts      platformPayoutRoutes    (Phase 5 Unit 13b, PLATFORM org)
+ *   /:orgId/billing/{profile,alerts}    → routes/billing.ts      billingRoutes           (Phase 5 Unit 14, advertiser)
+ *   /:orgId/platform/billing/advertisers/:advertiserOrgId/{profile,evaluate}
+ *                                       → routes/billing.ts      platformBillingRoutes   (Phase 5 Unit 14, PLATFORM org)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -45,6 +48,7 @@ import { requireOrg, requirePermission } from "../middleware/require-org";
 import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
 import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
 import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
+import { billingRoutes, platformBillingRoutes } from "./billing";
 import { marketplaceRoutes, offerReviewRoutes, offerRoutes } from "./offers";
 import { attributionPolicyRoutes, attributionRoutes, conversionRoutes, postbackSecretRoutes } from "./attribution";
 import { conversionHoldRoutes, conversionLifecycleRoutes } from "./conversions";
@@ -106,6 +110,8 @@ organizationRoutes.use("/:orgId/*", requireOrg);
 organizationRoutes.route("/:orgId/platform", platformPayoutRoutes);
 // Phase 5 Unit 13c — platform ledger face (/platform/ledger/tenants/:tenantOrgId/...), same ordering rule.
 organizationRoutes.route("/:orgId/platform", platformLedgerRoutes);
+// Phase 5 Unit 14 — platform billing face (/platform/billing/advertisers/:advertiserOrgId/...), same ordering rule.
+organizationRoutes.route("/:orgId/platform", platformBillingRoutes);
 
 // Phase 2 sub-modules (each route adds its own requirePermission).
 organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
@@ -148,6 +154,9 @@ organizationRoutes.route("/:orgId/payouts", payoutRoutes);
 
 // Phase 5 Unit 13c — tenant ledger face (balances / journals read-only, adjustments request+post, reserves).
 organizationRoutes.route("/:orgId/ledger", ledgerRoutes);
+
+// Phase 5 Unit 14 — advertiser billing face (own profile + funding alerts, read-only).
+organizationRoutes.route("/:orgId/billing", billingRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);
