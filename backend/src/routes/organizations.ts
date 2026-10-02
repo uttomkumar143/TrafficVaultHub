@@ -50,6 +50,7 @@ import { attributionPolicyRoutes, attributionRoutes, conversionRoutes, postbackS
 import { conversionHoldRoutes, conversionLifecycleRoutes } from "./conversions";
 import { complianceRoutes } from "./compliance";
 import { fraudRoutes } from "./fraud";
+import { ledgerRoutes, platformLedgerRoutes } from "./ledger";
 import { payoutRoutes, platformPayoutRoutes } from "./payouts";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 
@@ -103,6 +104,8 @@ organizationRoutes.use("/:orgId/*", requireOrg);
 // each payout route carries its own payouts.* permission and the service's
 // PLATFORM-org check.
 organizationRoutes.route("/:orgId/platform", platformPayoutRoutes);
+// Phase 5 Unit 13c — platform ledger face (/platform/ledger/tenants/:tenantOrgId/...), same ordering rule.
+organizationRoutes.route("/:orgId/platform", platformLedgerRoutes);
 
 // Phase 2 sub-modules (each route adds its own requirePermission).
 organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
@@ -142,6 +145,9 @@ organizationRoutes.route("/:orgId/compliance", complianceRoutes);
 
 // Phase 5 Unit 13a — affiliate-facing payouts (request / read / cancel; tenant = owning affiliate org).
 organizationRoutes.route("/:orgId/payouts", payoutRoutes);
+
+// Phase 5 Unit 13c — tenant ledger face (balances / journals read-only, adjustments request+post, reserves).
+organizationRoutes.route("/:orgId/ledger", ledgerRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);
