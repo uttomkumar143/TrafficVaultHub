@@ -359,26 +359,31 @@ export class WebhookService {
     const now = this.now();
     const eventId = crypto.randomUUID();
     const subs = await this.repo.findActiveSubscriptionsFor(organizationId, input.event_type);
-    await this.repo.publish(
-      organizationId,
-      {
-        id: eventId,
-        event_type: input.event_type,
-        payload: JSON.stringify(input.payload),
-        reference_type: input.reference_type ?? null,
-        reference_id: input.reference_id ?? null,
-        idempotency_key: key,
-        occurred_at: input.occurred_at ?? now,
-      },
-      subs.map((s) => ({ id: crypto.randomUUID(), subscription_id: s.id, event_id: eventId, next_attempt_at: now })),
-    );
-    const event = await this.repo.findEventById(organizationId, eventId);
-    if (!event) {
-      // UNIQUE(idempotency_key) raced with another producer: that event wins.
+    try {
+      await this.repo.publish(
+        organizationId,
+        {
+          id: eventId,
+          event_type: input.event_type,
+          payload: JSON.stringify(input.payload),
+          reference_type: input.reference_type ?? null,
+          reference_id: input.reference_id ?? null,
+          idempotency_key: key,
+          occurred_at: input.occurred_at ?? now,
+        },
+        subs.map((s) => ({ id: crypto.randomUUID(), subscription_id: s.id, event_id: eventId, next_attempt_at: now })),
+      );
+    } catch (err) {
+      if (!isIdempotencyKeyCollision(err)) throw err;
+      // UNIQUE(idempotency_key) is GLOBAL (0012). Either another producer of
+      // THIS tenant raced us (that event wins → replayed) or the key belongs
+      // to another tenant (409, nothing revealed about the owner).
       const winner = await this.repo.findEventByIdempotencyKey(organizationId, key);
-      if (!winner) throw new AppError(500, "INTERNAL_ERROR", "Webhook event was not persisted");
+      if (!winner) throw new AppError(409, "WEBHOOK_EVENT_DUPLICATE", "A webhook event with this idempotency key already exists");
       return { event: toPublicEvent(winner), deliveries: await this.repo.listDeliveriesForEvent(organizationId, winner.id), replayed: true };
     }
+    const event = await this.repo.findEventById(organizationId, eventId);
+    if (!event) throw new AppError(500, "INTERNAL_ERROR", "Webhook event was not persisted");
     return { event: toPublicEvent(event), deliveries: await this.repo.listDeliveriesForEvent(organizationId, eventId), replayed: false };
   }
 
@@ -723,6 +728,11 @@ function parseEventTypes(raw: unknown): string[] {
     out.add(t);
   }
   return out.has("*") ? ["*"] : Array.from(out).sort();
+}
+
+function isIdempotencyKeyCollision(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /UNIQUE constraint failed: webhook_events\.idempotency_key/i.test(msg);
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
