@@ -24,7 +24,7 @@ const APPR = "user-appr";
 const NOW = "2026-03-15T12:00:00.000Z";
 const T_AFF = AFF as TenantId;
 const META = { ip_address: null, user_agent: null, request_id: "req-1" };
-const ALL = ["payouts.read", "payouts.review", "payouts.approve", "payouts.release"];
+const ALL = ["payouts.read", "payouts.request", "payouts.review", "payouts.approve", "payouts.release"];
 
 function seed(db: TestD1): void {
   db.sqlite.exec(`
@@ -57,7 +57,7 @@ const apprCtx = ctxOf(APPR);
 const aff = tenantFor(AFF, ALL);
 const aff2 = tenantFor(AFF2, ALL);
 
-function count(db: TestD1, sql: string, ...args: unknown[]): number {
+function count(db: TestD1, sql: string, ...args: string[]): number {
   return (db.sqlite.prepare(sql).get(...args) as { n: number }).n;
 }
 const audits = (db: TestD1, action: string) => count(db, "SELECT COUNT(*) AS n FROM audit_logs WHERE action = ?", action);
@@ -452,17 +452,19 @@ describe("PayoutService", () => {
     expect((await repo.findById(T_AFF, p.id))?.status).toBe("UNDER_REVIEW");
   });
 
-  it("permission matrix: read / review / approve / release each gate their step with 403 FORBIDDEN before any I/O", async () => {
+  it("permission matrix: read / request / review / approve / release each gate their step with 403 FORBIDDEN before any I/O", async () => {
     await fund(20_000);
     const svc = service(new StubPaymentAdapter());
     const none = tenantFor(AFF, []);
     const reader = tenantFor(AFF, ["payouts.read"]);
+    const requester = tenantFor(AFF, ["payouts.read", "payouts.request"]);
     const reviewer = tenantFor(AFF, ["payouts.read", "payouts.review"]);
     const approver = tenantFor(AFF, ["payouts.read", "payouts.review", "payouts.approve"]);
     const input = { payout_method_id: "pm1", amount_minor: 10_000, currency: "USD", idempotency_key: "idem-1" };
     await expect(svc.request(reqCtx, none, input, META)).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
     await expect(svc.list(none, { limit: 5, cursor: null })).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
-    const p = await svc.request(reqCtx, reader, input, META);
+    await expect(svc.request(reqCtx, reader, input, META)).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" }); // payouts.read alone cannot request
+    const p = await svc.request(reqCtx, requester, input, META);
     await expect(svc.getPayout(none, p.id)).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
     await expect(svc.runEligibility(reqCtx, reader, p.id, META)).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
     await expect(svc.cancel(reqCtx, reader, p.id, null, META)).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });

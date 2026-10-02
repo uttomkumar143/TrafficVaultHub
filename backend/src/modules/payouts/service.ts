@@ -2,7 +2,7 @@
  * PayoutService — Phase 5 Unit 12 (PRD §65–§66, §114, §115, §132).
  *
  * Lifecycle (0011 trigger + state-machine.ts):
- *   request()        → REQUESTED                       (payouts.read, idempotency_key replay returns the same row)
+ *   request()        → REQUESTED                       (payouts.request, idempotency_key replay returns the same row)
  *   runEligibility() REQUESTED → ELIGIBILITY_CHECK → UNDER_REVIEW | FAILED   (payouts.review; never auto-approves)
  *   approve()        UNDER_REVIEW → APPROVED            (payouts.approve, approver ≠ requester, eligibility re-checked)
  *   process()        APPROVED | FAILED → PROCESSING → PAID | FAILED | (stays PROCESSING on PENDING)
@@ -205,7 +205,7 @@ export class PayoutService {
   // ---- request -----------------------------------------------------------------------------
 
   async request(ctx: AuthenticatedContext, tenant: TenantContext, input: RequestPayoutInput, meta: RequestMeta): Promise<PayoutRow> {
-    this.require(tenant, "payouts.read");
+    this.require(tenant, "payouts.request");
     assertMoney(input.amount_minor, input.currency);
     if (typeof input.idempotency_key !== "string" || input.idempotency_key.length < 1 || input.idempotency_key.length > 256) {
       throw new AppError(400, "INVALID_IDEMPOTENCY_KEY", "idempotency_key must be 1..256 characters");
