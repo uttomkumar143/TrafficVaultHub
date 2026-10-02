@@ -10,6 +10,7 @@ import type { OfferService } from "../modules/offers/service";
 import type { OrganizationService } from "../modules/organizations/service";
 import type { PaymentProvider } from "../modules/payouts/provider";
 import type { TrackingService } from "../modules/tracking/service";
+import type { WebhookTransport } from "../modules/webhooks/transport";
 
 export interface Bindings {
   // vars
@@ -65,6 +66,11 @@ export interface Variables {
    * Set by `createApp` (default StubPaymentAdapter; no real provider yet).
    */
   paymentProvider: PaymentProvider;
+  /**
+   * Phase 6 Unit 4 — outbound HTTP port for webhook delivery.
+   * Set by `createApp` (default FetchWebhookTransport; tests inject ScriptedWebhookTransport).
+   */
+  webhookTransport: WebhookTransport;
   /** Present only after `requireAuth` has run. */
   auth: AuthenticatedContext;
   /** Present only after `requireOrg` has run (RBAC + tenant scope, Unit 4). */

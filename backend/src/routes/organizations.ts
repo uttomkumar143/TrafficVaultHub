@@ -37,6 +37,9 @@
  *   /:orgId/platform/billing/advertisers/:advertiserOrgId/{profile,evaluate}
  *                                       → routes/billing.ts      platformBillingRoutes   (Phase 5 Unit 14, PLATFORM org)
  *   /:orgId/api-keys(/*)                → routes/api-keys.ts     apiKeyRoutes            (Phase 6 Unit 3, any tenant)
+ *   /:orgId/webhooks(/*)                → routes/webhooks.ts     webhookRoutes           (Phase 6 Unit 4, any tenant)
+ *   /:orgId/platform/webhooks/{process-due,tenants/:tenantOrgId/...}
+ *                                       → routes/webhooks.ts     platformWebhookRoutes   (Phase 6 Unit 4, PLATFORM org)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -59,6 +62,7 @@ import { fraudRoutes } from "./fraud";
 import { ledgerRoutes, platformLedgerRoutes } from "./ledger";
 import { payoutRoutes, platformPayoutRoutes } from "./payouts";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
+import { platformWebhookRoutes, webhookRoutes } from "./webhooks";
 
 const nameSchema = z.string().trim().min(2).max(120);
 const slugSchema = z
@@ -114,6 +118,8 @@ organizationRoutes.route("/:orgId/platform", platformPayoutRoutes);
 organizationRoutes.route("/:orgId/platform", platformLedgerRoutes);
 // Phase 5 Unit 14 — platform billing face (/platform/billing/advertisers/:advertiserOrgId/...), same ordering rule.
 organizationRoutes.route("/:orgId/platform", platformBillingRoutes);
+// Phase 6 Unit 4 — platform webhook face (/platform/webhooks/process-due, /platform/webhooks/tenants/:tenantOrgId/...), same ordering rule.
+organizationRoutes.route("/:orgId/platform", platformWebhookRoutes);
 
 // Phase 2 sub-modules (each route adds its own requirePermission).
 organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
@@ -162,6 +168,9 @@ organizationRoutes.route("/:orgId/billing", billingRoutes);
 
 // Phase 6 Unit 3 — API keys (secret shown once; hash never selected by a read path).
 organizationRoutes.route("/:orgId/api-keys", apiKeyRoutes);
+
+// Phase 6 Unit 4 — webhook subscriptions + delivery log (secret shown once; ciphertext never selected by a read path).
+organizationRoutes.route("/:orgId/webhooks", webhookRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);

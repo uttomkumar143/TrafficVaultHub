@@ -17,6 +17,7 @@ import { StubPaymentAdapter } from "./modules/payouts/stub-adapter";
 import { EligibilityCache } from "./modules/tracking/eligibility-cache";
 import { TrackingRepository } from "./modules/tracking/repository";
 import { TrackingService } from "./modules/tracking/service";
+import { FetchWebhookTransport, type WebhookTransport } from "./modules/webhooks/transport";
 import { postbackRoutes } from "./routes/attribution";
 import { authRoutes } from "./routes/auth";
 import { healthRoutes } from "./routes/health";
@@ -34,6 +35,11 @@ export interface CreateAppOptions {
    * yet; tests inject scripted providers through this seam.
    */
   paymentProvider?: PaymentProvider;
+  /**
+   * Outbound transport for webhook deliveries (Phase 6 Unit 4). Defaults to
+   * `FetchWebhookTransport`; tests inject `ScriptedWebhookTransport` (no network).
+   */
+  webhookTransport?: WebhookTransport;
 }
 
 /**
@@ -45,6 +51,7 @@ export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<AppEnv>();
   const emailSender = options.emailSender ?? new LogEmailSender();
   const paymentProvider: PaymentProvider = options.paymentProvider ?? new StubPaymentAdapter();
+  const webhookTransport: WebhookTransport = options.webhookTransport ?? new FetchWebhookTransport();
 
   // PRD §72 — uniform error envelope, no stack traces exposed.
   app.notFound((c) =>
@@ -75,6 +82,7 @@ export function createApp(options: CreateAppOptions = {}) {
     }
     const ttl = Number(c.env.SESSION_TTL_SECONDS);
     c.set("paymentProvider", paymentProvider);
+    c.set("webhookTransport", webhookTransport);
     c.set(
       "authService",
       new AuthService(new AuthRepository(c.env.DB), emailSender, {
