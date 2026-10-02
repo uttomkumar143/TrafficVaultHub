@@ -12,6 +12,8 @@ import { OfferRepository } from "./modules/offers/repository";
 import { OfferService } from "./modules/offers/service";
 import { OrganizationRepository } from "./modules/organizations/repository";
 import { OrganizationService } from "./modules/organizations/service";
+import type { PaymentProvider } from "./modules/payouts/provider";
+import { StubPaymentAdapter } from "./modules/payouts/stub-adapter";
 import { EligibilityCache } from "./modules/tracking/eligibility-cache";
 import { TrackingRepository } from "./modules/tracking/repository";
 import { TrackingService } from "./modules/tracking/service";
@@ -26,6 +28,12 @@ export interface CreateAppOptions {
   emailSender?: EmailSender;
   /** Test seams for the public redirect endpoints (Phase 3 Unit 2). */
   redirect?: RedirectRouteOptions;
+  /**
+   * Payment provider used by the PLATFORM payout `process` step (Phase 5).
+   * Defaults to `StubPaymentAdapter` — KNOWN GAP: no real provider is wired
+   * yet; tests inject scripted providers through this seam.
+   */
+  paymentProvider?: PaymentProvider;
 }
 
 /**
@@ -36,6 +44,7 @@ export interface CreateAppOptions {
 export function createApp(options: CreateAppOptions = {}) {
   const app = new Hono<AppEnv>();
   const emailSender = options.emailSender ?? new LogEmailSender();
+  const paymentProvider: PaymentProvider = options.paymentProvider ?? new StubPaymentAdapter();
 
   // PRD §72 — uniform error envelope, no stack traces exposed.
   app.notFound((c) =>
@@ -65,6 +74,7 @@ export function createApp(options: CreateAppOptions = {}) {
       throw new AppError(503, "SERVICE_UNAVAILABLE", "Database binding is not configured");
     }
     const ttl = Number(c.env.SESSION_TTL_SECONDS);
+    c.set("paymentProvider", paymentProvider);
     c.set(
       "authService",
       new AuthService(new AuthRepository(c.env.DB), emailSender, {

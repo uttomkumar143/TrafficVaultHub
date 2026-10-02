@@ -8,6 +8,7 @@ import type { AffiliateService } from "../modules/affiliates/service";
 import type { AuthService, AuthenticatedContext } from "../modules/auth/service";
 import type { OfferService } from "../modules/offers/service";
 import type { OrganizationService } from "../modules/organizations/service";
+import type { PaymentProvider } from "../modules/payouts/provider";
 import type { TrackingService } from "../modules/tracking/service";
 
 export interface Bindings {
@@ -59,6 +60,11 @@ export interface Variables {
   offerService: OfferService;
   /** Phase 3 Unit 1 — tracking links + click reads. */
   trackingService: TrackingService;
+  /**
+   * Phase 5 — payment provider for the PLATFORM payout `process` step.
+   * Set by `createApp` (default StubPaymentAdapter; no real provider yet).
+   */
+  paymentProvider: PaymentProvider;
   /** Present only after `requireAuth` has run. */
   auth: AuthenticatedContext;
   /** Present only after `requireOrg` has run (RBAC + tenant scope, Unit 4). */

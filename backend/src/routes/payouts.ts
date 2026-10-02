@@ -95,11 +95,12 @@ export function payoutStatusFilter(raw: string | undefined): PayoutStatus | unde
 }
 
 /**
- * Per-request service over the bound D1. The payment provider is the stub
- * adapter until a real provider is configured (Phase 5 known gap); it is only
- * reached by the PLATFORM `process` step, never by these affiliate routes.
+ * Per-request service over the bound D1. The payment provider comes from the
+ * `createApp` seam (`c.get("paymentProvider")`, default StubPaymentAdapter
+ * until a real provider is configured — Phase 5 known gap); it is only
+ * reached by the PLATFORM `process` step, never by the affiliate routes.
  */
-export function buildPayoutService(c: Ctx, provider: PaymentProvider = new StubPaymentAdapter()): PayoutService {
+export function buildPayoutService(c: Ctx, provider: PaymentProvider = c.get("paymentProvider") ?? new StubPaymentAdapter()): PayoutService {
   const db = c.env.DB;
   const ledger = new LedgerRepository(db);
   const reserves = new ReserveService(new ReserveRepository(db), ledger, new AuditRepository(db));
