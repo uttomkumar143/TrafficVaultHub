@@ -269,6 +269,11 @@ export class PayoutService {
       // Concurrent replay of the same key: the UNIQUE index won; return the winner.
       const replay = await this.repo.findByIdempotencyKey(tenantId, input.idempotency_key);
       if (replay) return replay;
+      // 0011: payouts.idempotency_key is UNIQUE network-wide. A key already used
+      // by ANOTHER tenant is refused (never replayed across tenants, never 500).
+      if (err instanceof Error && /UNIQUE constraint failed: payouts\.idempotency_key/.test(err.message)) {
+        throw new AppError(409, "IDEMPOTENCY_KEY_CONFLICT", "idempotency_key is already in use");
+      }
       throw err;
     }
     return this.mustFind(tenantId, id);
