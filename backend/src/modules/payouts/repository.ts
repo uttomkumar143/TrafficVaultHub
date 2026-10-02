@@ -32,6 +32,7 @@
  * `openDisputeCount()` returns 0 (documented, see below).
  */
 import { AppError } from "../../lib/errors";
+import { slicePage, type Page, type PageRequest } from "../../lib/pagination";
 import { scopedQuery, type TenantId } from "../../lib/tenant-scope";
 import type { ComplianceCaseStatus } from "../compliance/repository";
 import type { HoldFacts, HoldType } from "../conversions/state-machine";
@@ -279,6 +280,28 @@ export class PayoutRepository {
       limit,
     ).all<PayoutRow>();
     return res.results;
+  }
+
+  /** Cursor page (created_at DESC, id DESC) — PRD §127; optional status filter. */
+  async listPage(tenantId: TenantId, page: PageRequest, filter: { status?: PayoutStatus } = {}): Promise<Page<PayoutRow>> {
+    const where: string[] = ["organization_id = ?"];
+    const binds: unknown[] = [];
+    if (filter.status !== undefined) {
+      where.push("status = ?");
+      binds.push(filter.status);
+    }
+    if (page.cursor) {
+      where.push("(created_at < ? OR (created_at = ? AND id < ?))");
+      binds.push(page.cursor.created_at, page.cursor.created_at, page.cursor.id);
+    }
+    const res = await scopedQuery(
+      this.db,
+      `SELECT * FROM payouts WHERE ${where.join(" AND ")} ORDER BY created_at DESC, id DESC LIMIT ?`,
+      tenantId,
+      ...binds,
+      page.limit + 1,
+    ).all<PayoutRow>();
+    return slicePage(res.results, page.limit);
   }
 
   async listStatusHistory(tenantId: TenantId, payoutId: string): Promise<PayoutStatusHistoryRow[]> {
