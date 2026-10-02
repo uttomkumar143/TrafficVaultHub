@@ -3,10 +3,73 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
-**Phase 4 — Conversions, Fraud & Compliance** (`07-PHASE4-CONVERSIONS-FRAUD-COMPLIANCE.md`)
-is **COMPLETE, all 11 units, as of `40e0213` (code) + this docs commit (2026-09-30, Session 38)**;
+**Phase 5 — Finance, Ledger & Payouts** (`08-PHASE5-FINANCE-LEDGER-PAYOUTS.md`) is **COMPLETE,
+all 16 implementation units, code at `7abbe4a` + this docs commit (2026-10-02, Session 58)**; see
+"Phase 5 — unit status", "Phase 5 verification" and "Phase 5 known gaps" below. Do not redo it.
+**Phase 6 (`09-PHASE6-API-WEBHOOKS-INTEGRATIONS-NOTIFICATIONS.md`) is NOT STARTED** — wait for the
+user's instruction.
+
+Phase 4 — Conversions, Fraud & Compliance (`07-PHASE4-CONVERSIONS-FRAUD-COMPLIANCE.md`)
+is **COMPLETE, all 11 units, as of `40e0213` (code) + Session 38 docs (2026-09-30)**;
 see "Phase 4 — unit status", "Phase 4 verification" and "Phase 4 known gaps" below. Do not redo it.
-**Phase 5 (`08-PHASE5-FINANCE-LEDGER-PAYOUTS.md`) is NOT STARTED** — wait for the user's instruction.
+
+## Phase 5 — unit status (code `7abbe4a`, 2026-10-02)
+
+Migrations are repo-root `migrations/0010_ledger_core.sql` and `migrations/0011_billing_payouts.sql`
+(the spec's "0006_finance_payouts" name was already taken; 0012 was NOT needed — the 0009 CHECKs admit
+`MATCHED|MISMATCHED` and `LEDGER_MISMATCH`). All services run on `backend/` (`package.json` lives there).
+
+| Unit | Scope | Status |
+|------|-------|--------|
+| P5-1 | Migration `0010_ledger_core.sql`: `ledger_accounts`, `journal_entries`, `ledger_entries`, `balance_snapshots`, `commissions`, `financial_adjustments`, `reserves`, `financial_processing_errors`, append-only triggers | **COMPLETE** — `46cd969` |
+| P5-2 | `modules/ledger/money.ts` (integer-only Money) + `journal.ts` (balanced double-entry builder/validator, compensating journal, `verifyConversionPosting`) | **COMPLETE** — `7d91897`, `8e22e1e`, `b53b53b`, `4f7dbfa`; tests `49af96d`, `029641e` (`journal.test.ts`) |
+| P5-3 | `LedgerRepository`: one-batch `postJournal` (journal + legs + caller statements), balances from `ledger_entries` | **COMPLETE** — `4ba68a1` + `9e26799` (`repository.test.ts`, 5) |
+| P5-4 | `LedgerService.postConversionCommission` / `reverseConversionCommission` + `InternalOps.markLedgerPosted` | **COMPLETE** — `66d6f2a`, `fd0d015`, `f6743e5`; tests `4a891ad` (`service.test.ts`, 4) |
+| P5-5 | Manual adjustments (`AdjustmentRepository` + `AdjustmentService`, §59/§131/§132 approval, fail-safe error record) | **COMPLETE** — `95da12a` + `fe16809` (`adjustments.test.ts`, 7) |
+| P5-6 | Reserves (`ReserveRepository` + `ReserveService`), independent of ledger balance | **COMPLETE** — `01fdccb` + `7ae79d8` (`reserves.test.ts`, 7) |
+| P5-7 | Migration `0011_billing_payouts.sql`: `advertiser_billing_profiles`, `funding_alerts`, `payout_methods`, `payouts`, `payout_status_history`, `payout_attempts`, `payouts.*` permissions | **COMPLETE** — `84da24d` |
+| P5-8 | Billing: `funding.ts` pure capacity, `BillingRepository` + `BillingService.evaluateFunding` (pauses LIVE offers, alerts) | **COMPLETE** — `14f37e2`, `9b47a00`, `5b13bdd` (`billing/service.test.ts`, 7) |
+| P5-9 | `PaymentProvider` port (`createPayout/getStatus/verifyWebhook/cancelPayout`) + stub adapter | **COMPLETE** — `78bc6b1` (`stub-adapter.test.ts`) |
+| P5-10 | Payout state machine (§65) + pure eligibility (§66) | **COMPLETE** — `0011c35` (`state-machine.test.ts`), `352bb41` (`eligibility.test.ts`) |
+| P5-11 | `PayoutRepository` (payouts / status history / attempts) | **COMPLETE** — `0387263` + `fab7a05` (`payouts/repository.test.ts`, 7) |
+| P5-12 | `PayoutService` (request idempotency, eligibility, approve, process, fail/retry, ONE PAYOUT journal) | **COMPLETE** — `5684ae0` + `0ee8ec3` (`payouts/service.test.ts`, 13) |
+| P5-13 | HTTP: payouts affiliate face (13a), platform face + `createApp` provider seam (13b), ledger routes (13c) | **COMPLETE** — `7925d71`, `fd1ebad`, `f343d47`; `c3a1c92`, `de286cb`, `6a6b8e9`, `61a41d0`; `374c0e2`, `0111236` |
+| P5-14 | HTTP: billing routes (tenant + platform faces) | **COMPLETE** — `e842635` + `111adae` (`billing-http.test.ts`, 5) |
+| P5-15 | Reconciliation ledger side (§114 #6): `ledger_status MATCHED|MISMATCHED`, `LEDGER_MISMATCH` cases | **COMPLETE** — `f2458af`, `4d0f2c8`, `b0f1edb`, `7abbe4a` (`reconciliation/service.test.ts` block "ReconciliationService — ledger side (§114 #6)", 4) |
+| P5-16 | STATE.md + docs/CHECKLIST.md | **COMPLETE** — this commit (Session 58) |
+
+## Phase 5 verification — Session 58 at `7abbe4a` (2026-10-02)
+
+`cd backend`: typecheck 0 errors; vitest **574/574** (64 files); build OK; `scripts/secret-scan.sh`
+CLEAN; `wrangler d1 migrations apply trafficvaulthub-db --local` from empty applies 0001–0011.
+(Final-gate numbers re-run after this docs commit are recorded in "Last Updated".)
+
+§114 critical financial tests → test name:
+
+| §114 requirement | Test |
+|------------------|------|
+| duplicate conversion → no duplicate commission | `modules/ledger/service.test.ts` → "duplicate conversion produces no duplicate commission" |
+| duplicate payout → no duplicate payout | `modules/payouts/service.test.ts` → "§114 duplicate payout → no duplicate payout: same idempotency key returns the same row; re-processing never calls the provider or posts twice" |
+| reversal → compensating entry | `modules/ledger/service.test.ts` → "reversal posts compensating ledger entry"; `modules/ledger/journal.test.ts` → "mirrors every leg, keeps order/total/currency/tenant, points at the original" |
+| manual adjustment → audited | `modules/ledger/adjustments.test.ts` → "manual adjustment is audited and cannot post without approval" (+ "self-approval is refused by the service and by the database") |
+| failed payout → recoverable | `modules/payouts/service.test.ts` → "§114 failed payout → recoverable: provider FAILED → FAILED (no ledger effect), retry → PROCESSING → PAID"; `src/test/payouts-platform-http.test.ts` → "§114 failed provider → FAILED (no ledger effect) → retry replays the same key → FAILED again; recovering provider → PAID with one journal" |
+| reconciliation mismatch → detected (incl. ledger side) | `modules/reconciliation/service.test.ts` → "(b) tampered/missing journals → MISMATCHED with one LEDGER_MISMATCH case per discrepancy, tenant-scoped, audited and resolvable" (+ "(a) clean ledger → MATCHED…", "(c) PAID payouts without / with a mismatching PAYOUT journal…", "(d) the atomic batch is preserved…") |
+
+Fail-safe (§131): `modules/ledger/adjustments.test.ts` → "fail-safe: an unverifiable adjustment records a
+processing error and posts nothing (§131)"; `journal.test.ts` → "rejects commission mismatch (amount
+tampered, missing, wrong currency) — pinned version wins".
+
+## Phase 5 known gaps (carried into Phase 6 / later)
+
+- No disputes table: payout eligibility `open_dispute_count` is always 0.
+- Payout policy (holding days, minimum thresholds) is constructor-injected into `PayoutService`, defaults 0;
+  no persisted policy table.
+- PENDING payout webhook / `getStatus()` polling is not wired (provider port exists; stub is synchronous).
+- `PAYOUT_CLEARING` → cash settlement is not modelled (no CASH leg after PAID).
+- No second real payment provider: the stub adapter is the default `createApp` provider.
+- No billing profile update and no funding-alert acknowledge endpoints (no service methods either).
+- Account-level fraud actions remain record-only (Phase 4 carry-over).
+- Reconciliation has no HTTP routes and no `scheduled()` wiring (service + `runScheduled` only).
 
 Phase 3 — Tracking, Attribution & SmartLinks (`06-PHASE3-TRACKING-SMARTLINKS-ATTRIBUTION.md`)
 is **COMPLETE, all 10 units, as of `61fdeaa` (2026-09-29, Session 25)**; see "Phase 3 — unit
@@ -246,17 +309,16 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 4 Unit 11 (P4-11) — this commit (Session 38): STATE.md + docs/CHECKLIST.md brought up to the
-Phase 4 code state at `40e0213`. Last code unit: P4-10c `0493286` + `40e0213` (Session 37):
-`routes/compliance.ts` + `src/test/compliance-http.test.ts` (5). Verified Session 37 at `40e0213`:
-typecheck 0, vitest **434/434** (48 files), build OK, secret scan CLEAN (238 files),
-migrations 0001–0009 apply, `HEAD == origin/main`.
+Phase 5 Unit 16 (P5-16) — this commit (Session 58): STATE.md + docs/CHECKLIST.md brought up to the
+Phase 5 code state at `7abbe4a`. Last code unit: P5-15 `7abbe4a` (Session 58): reconciliation ledger
+side tests (`reconciliation/service.test.ts`, 11 tests in file). Verified Session 58 at `7abbe4a`:
+typecheck 0, vitest **574/574** (64 files), `HEAD == origin/main`.
 
 ## Next Planned Unit
-**None in Phase 4 — Phase 4 is COMPLETE.** Phase 5 (`08-PHASE5-FINANCE-LEDGER-PAYOUTS.md`, ledger /
-earnings / payouts) is NOT STARTED and must not begin without the user's instruction. Phase 4
-known gaps (above) are the natural Phase 5 inputs: ledger posting, payout eligibility, reconciliation
-ledger side, reconciliation HTTP + scheduling.
+**None in Phase 5 — Phase 5 is COMPLETE.** Phase 6 (`09-PHASE6-API-WEBHOOKS-INTEGRATIONS-NOTIFICATIONS.md`)
+is NOT STARTED and must not begin without the user's instruction. Phase 5 known gaps (above) are the
+natural Phase 6 inputs: payout provider webhooks / status polling, notifications for funding alerts and
+payout state changes, reconciliation HTTP + scheduling.
 Carry-over items that are NOT blockers: PLATFORM-org bootstrap path (Phase 9), placeholder
 Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval, `EVENTS_QUEUE` enrichment
 consumer (redirect currently records the coarse signals inline; queue binding unused).
@@ -335,13 +397,14 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-09-30 — Session 38 (docs only). Fresh sandbox; resumed from `40e0213` (HEAD == origin/main).
-Wrote Phase 4 Unit 11: STATE.md + docs/CHECKLIST.md (Phase 4 unit table, verification, DoD → test
-map, known gaps). No source changed. Phase 4: 11/11 units COMPLETE. Results verified Session 37 at
-`40e0213`: vitest 434/434 (48 files), typecheck 0, build OK, secret scan CLEAN (238 files),
-migrations 0001–0009 apply locally. Phase 5 NOT STARTED.
+2026-10-02 — Session 58. Fresh sandbox; resumed from `wip/phase5` `f2458af` (1 ahead of main
+`111adae`). Finished Phase 5 Unit 15 (LEDGER_BEARING fix `4d0f2c8`, Phase 4 tests updated `b0f1edb`,
+ledger-side block `7abbe4a`), ff-merged to main; wrote Unit 16 docs (this commit). Results at
+`7abbe4a`: vitest 574/574 (64 files), typecheck 0. Phase 5: 16/16 units COMPLETE. Phase 6 NOT STARTED.
 
 Session log:
 - Session 25 (2026-09-29): Phase 3 complete at `61fdeaa` (362/362).
 - Sessions 26–37 (2026-09-29 → 2026-09-30): Phase 4 code, P4-1 `a9d4a15` → P4-10c `40e0213` (434/434).
-- Session 38 (2026-09-30): Phase 4 Unit 11 docs (this commit).
+- Session 38 (2026-09-30): Phase 4 Unit 11 docs.
+- Sessions 39–57 (2026-09-30 → 2026-10-01): Phase 5 code, P5-1 `46cd969` → P5-14 `111adae` (570/570), P5-15 service `f2458af` on `wip/phase5`.
+- Session 58 (2026-10-02): P5-15 finish `4d0f2c8` → `7abbe4a` (574/574), merged to main; P5-16 docs (this commit).

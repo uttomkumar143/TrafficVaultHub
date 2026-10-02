@@ -14,12 +14,16 @@ pass AND committed AND pushed. Anything less is `PARTIAL`.
 
 ```
 Total required units : 96
-COMPLETE             : 17
+COMPLETE             : 29
 PARTIAL              : 1
 BLOCKED              : 0
-NOT STARTED          : 78
-Completion           : 17 / 96 = 17.7 %
+NOT STARTED          : 66
+Completion           : 29 / 96 = 30.2 %  (see note)
 ```
+
+Note (Session 58): this block was last fully re-audited at `d416b4c`; Session 58 only added Phase 5's
+12 DONE rows to it. Phases 3 and 4 state their own totals (10/10, 11/11) in their sections and are
+NOT yet folded into this block; the Phase 2 section's row statuses are stale relative to its heading.
 
 Calculation basis: unit rows below; documentation-only rows (STATE.md units)
 count as one unit each exactly as the prompts list them.
@@ -164,22 +168,37 @@ Verification (verified Session 37 at `40e0213`; the Session 38 commit is docs-on
 
 Known gaps carried to Phase 5: no ledger; `ACCOUNT_RESTRICTION`/`ACCOUNT_SUSPENSION` recorded only (`organizations.status` unchanged); reconciliation ledger side `NOT_AVAILABLE`; reconciliation has no HTTP routes and no `scheduled()` wiring; HTTP never reaches `LEDGER_POSTED`/`EARNED`/`PAYOUT_ELIGIBLE`/`PAID`.
 
-## Phase 5 — Finance, Ledger, Payouts (`08-…`) — 0/12 NOT STARTED
+## Phase 5 — Finance, Ledger, Payouts (`08-…`) — 12/12 COMPLETE (code `7abbe4a`, docs Session 58, 2026-10-02)
+
+Migrations landed as repo-root `migrations/0010_ledger_core.sql` + `0011_billing_payouts.sql` (the spec's `0006` name was taken). Full unit/hash table: STATE.md "Phase 5 — unit status".
 
 | Unit | Requirement | Status |
 |------|-------------|--------|
-| 5.1 | Chart of accounts & journal entries (§56, §57) | NOT STARTED |
-| 5.2 | Commission records (§58) | NOT STARTED |
-| 5.3 | Financial adjustments (§59) | NOT STARTED |
-| 5.4 | Reserves (§60) | NOT STARTED |
-| 5.5 | Advertiser funding & billing (§61–§63) | NOT STARTED |
-| 5.6 | Payout architecture (§64, §68) | NOT STARTED |
-| 5.7 | Payout eligibility & state machine (§65, §66) | NOT STARTED |
-| 5.8 | Payout idempotency (§67) | NOT STARTED |
-| 5.9 | Critical financial tests (§114) | NOT STARTED |
-| 5.10 | Financial fail-safe (§131) | NOT STARTED |
-| 5.11 | Migration | NOT STARTED |
-| 5.12 | STATE.md | NOT STARTED |
+| 5.1 | Chart of accounts & journal entries (§56, §57) — append-only, balanced double-entry, integer minor units | DONE — `46cd969` (0010), `7d91897` `money.ts`, `8e22e1e`/`b53b53b`/`4f7dbfa` `journal.ts`, `4ba68a1` `LedgerRepository`; tests `49af96d`+`029641e` `journal.test.ts` ("rejects unbalanced, one-sided, too-few, empty, same-account-both-sides", "assertBalanced catches tampered rows (total mismatch, dup index, leg currency)"), `9e26799` `repository.test.ts` (5); HTTP read-only `374c0e2`+`0111236` `ledger-http.test.ts` (7, no route posts a raw journal) |
+| 5.2 | Commission records (§58) from APPROVED conversions, pinned offer version, amount_minor + currency | DONE — `f6743e5` `LedgerService.postConversionCommission`, `fd0d015` `markLedgerPosted`; `4a891ad` `ledger/service.test.ts` → "duplicate conversion produces no duplicate commission"; `journal.test.ts` → "accepts an APPROVED, unposted conversion whose stored commission equals the pinned version", "REVSHARE recomputes floor(sale × bps / 10000), never guesses advertiser/margin" |
+| 5.3 | Financial adjustments (§59) — reason/actor/reference/amount/currency/before/after/approval/timestamp, approver ≠ requester | DONE — `95da12a`; `fe16809` `adjustments.test.ts` → "manual adjustment is audited and cannot post without approval", "self-approval is refused by the service and by the database", "posting twice is impossible (service guard, guarded UPDATE, terminal trigger, idempotency key)" |
+| 5.4 | Reserves (§60) independent from available balance | DONE — `01fdccb`; `7ae79d8` `reserves.test.ts` → "reserve reduces available but NOT the ledger balance; journal_entries count unchanged" |
+| 5.5 | Advertiser funding & billing (§61–§63) — PREPAID/POSTPAID/CREDIT, funding protection pauses offers | DONE — `84da24d` (0011), `14f37e2` `funding.ts`, `9b47a00` `BillingService`; `5b13bdd` `billing/service.test.ts` → "insufficient advertiser capacity pauses the offer and it disappears from SmartLink eligibility", "PREPAID: ADVERTISER_PREPAID ledger balance in the profile currency is the capacity (no account → 0 → pause)"; HTTP `e842635`+`111adae` `billing-http.test.ts` (5). Gap: no profile update / alert acknowledge endpoints |
+| 5.6 | Payout architecture (§64, §68) — `PaymentProvider` adapter (`createPayout/getStatus/verifyWebhook/cancelPayout`) | DONE (stub provider only) — `78bc6b1` `provider.ts` + `stub-adapter.ts` (`stub-adapter.test.ts`); `6a6b8e9` `createApp` provider seam. Gap: no second real provider, PENDING webhook/polling not wired |
+| 5.7 | Payout eligibility & state machine (§65, §66) | DONE — `0011c35` `state-machine.test.ts` → "defines the §65 edges exactly: REQUESTED → ELIGIBILITY_CHECK → UNDER_REVIEW → APPROVED → PROCESSING → PAID, FAILED recoverable, CANCELLED"; `352bb41` `eligibility.test.ts` → "reasons are collected (not short-circuited), de-duplicated, and emitted in the stable declared order"; `0ee8ec3` `payouts/service.test.ts` → "ineligible payouts are rejected to FAILED with stable reasons in history/audit and nothing is paid". Gaps: `open_dispute_count` always 0 (no disputes table); policy constructor-injected, defaults 0 |
+| 5.8 | Payout idempotency (§67) — immutable internal ID + provider reference, retry cannot create a second payout | DONE — `5684ae0`; `payouts/service.test.ts` → "§114 duplicate payout → no duplicate payout: same idempotency key returns the same row; re-processing never calls the provider or posts twice"; `61a41d0` `payouts-platform-http.test.ts` → "process → PAID: exactly ONE PAYOUT journal; duplicate process → 409 with one payout / attempt / journal; history actor PLATFORM; audit on the AFFILIATE org" |
+| 5.9 | Critical financial tests (§114, all six) | DONE — see §114 table below |
+| 5.10 | Financial fail-safe (§131) — unverifiable → no posting, `financial_processing_error` record | DONE — 0010 `financial_processing_errors`; `adjustments.test.ts` → "fail-safe: an unverifiable adjustment records a processing error and posts nothing (§131)"; `journal.test.ts` → "rejects commission mismatch (amount tampered, missing, wrong currency) — pinned version wins", "refuses: already reversed, reversal-of-reversal, non-reversible type, no legs, tampered total" |
+| 5.11 | Migration | DONE — `46cd969` `0010_ledger_core.sql`, `84da24d` `0011_billing_payouts.sql` (additive, IF NOT EXISTS); apply from empty verified Session 58 |
+| 5.12 | STATE.md | DONE — Session 58 (this commit) |
+
+§114 Definition-of-done tests (all exist and pass at `7abbe4a`, vitest 574/574):
+
+| §114 test | Commit | Test name |
+|-----------|--------|-----------|
+| duplicate conversion → no duplicate commission | `4a891ad` | `modules/ledger/service.test.ts` → "duplicate conversion produces no duplicate commission" |
+| duplicate payout → no duplicate payout | `0ee8ec3` | `modules/payouts/service.test.ts` → "§114 duplicate payout → no duplicate payout: same idempotency key returns the same row; re-processing never calls the provider or posts twice" |
+| reversal → compensating entry | `4a891ad`, `029641e` | `modules/ledger/service.test.ts` → "reversal posts compensating ledger entry"; `modules/ledger/journal.test.ts` → "mirrors every leg, keeps order/total/currency/tenant, points at the original" |
+| manual adjustment → audited | `fe16809` | `modules/ledger/adjustments.test.ts` → "manual adjustment is audited and cannot post without approval" |
+| failed payout → recoverable | `0ee8ec3`, `61a41d0` | `modules/payouts/service.test.ts` → "§114 failed payout → recoverable: provider FAILED → FAILED (no ledger effect), retry → PROCESSING → PAID"; `src/test/payouts-platform-http.test.ts` → "§114 failed provider → FAILED (no ledger effect) → retry replays the same key → FAILED again; recovering provider → PAID with one journal" |
+| reconciliation mismatch → detected (incl. ledger side) | `f2458af`…`7abbe4a` | `modules/reconciliation/service.test.ts` → "(b) tampered/missing journals → MISMATCHED with one LEDGER_MISMATCH case per discrepancy, tenant-scoped, audited and resolvable", "(c) PAID payouts without / with a mismatching PAYOUT journal → PAYOUT_JOURNAL_MISSING / PAYOUT_JOURNAL_MISMATCH keyed payout:<id>; out-of-period and other tenants ignored" |
+
+Known gaps carried to Phase 6: no disputes table (`open_dispute_count = 0`); payout policy constructor-injected (defaults 0, no table); PENDING payout webhook / `getStatus` polling not wired; `PAYOUT_CLEARING` → cash settlement not modelled; no second real payment provider (stub is the default `createApp` provider); no billing profile update / funding-alert acknowledge endpoints; account-level fraud actions record-only (Phase 4); reconciliation has no HTTP routes and no `scheduled()` wiring.
 
 ## Phase 6 — API, Webhooks, Integrations, Notifications (`09-…`) — 0/10
 
