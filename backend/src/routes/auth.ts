@@ -24,7 +24,7 @@ import type { AppEnv } from "../lib/bindings";
 import { AppError } from "../lib/errors";
 import { requestMeta as meta } from "../lib/request-meta";
 import { parseJsonBody } from "../lib/validation";
-import { requireAuth } from "../middleware/require-auth";
+import { requireAuth, requireSession } from "../middleware/require-auth";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../modules/auth/constants";
 
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
@@ -81,7 +81,7 @@ authRoutes.post("/reset-password", async (c) => {
   return c.body(null, 204);
 });
 
-authRoutes.post("/logout", requireAuth, async (c) => {
+authRoutes.post("/logout", requireAuth, requireSession, async (c) => {
   await c.get("authService").logout(c.get("auth"), meta(c));
   return c.body(null, 204);
 });
@@ -98,17 +98,17 @@ authRoutes.get("/mfa", requireAuth, (c) => {
 
 // ---- session & device management (Unit 2) ----------------------------------
 
-authRoutes.get("/sessions", requireAuth, async (c) => {
+authRoutes.get("/sessions", requireAuth, requireSession, async (c) => {
   const sessions = await c.get("authService").listSessions(c.get("auth"));
   return c.json({ sessions }, 200);
 });
 
-authRoutes.post("/sessions/revoke-others", requireAuth, async (c) => {
+authRoutes.post("/sessions/revoke-others", requireAuth, requireSession, async (c) => {
   const result = await c.get("authService").revokeOtherSessions(c.get("auth"), meta(c));
   return c.json(result, 200);
 });
 
-authRoutes.delete("/sessions/:id", requireAuth, async (c) => {
+authRoutes.delete("/sessions/:id", requireAuth, requireSession, async (c) => {
   // A malformed id can never match a session, so it is indistinguishable
   // from an unknown one — answer 404 rather than 400 to keep one code path.
   const parsed = sessionIdSchema.safeParse(c.req.param("id"));

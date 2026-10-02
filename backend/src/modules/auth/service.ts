@@ -18,6 +18,7 @@ import {
   EMAIL_VERIFICATION_TTL_SECONDS,
   PASSWORD_RESET_TTL_SECONDS,
 } from "./constants";
+import type { ApiKeyPrincipal } from "../api-keys/service";
 import type { EmailSender } from "./email";
 import { getMfaStatus, type MfaStatus } from "./mfa";
 import { hashPassword, needsRehash, verifyPassword } from "./password";
@@ -61,7 +62,18 @@ export interface SessionListItem extends SessionInfo {
 export interface AuthenticatedContext {
   user: PublicUser;
   session: SessionInfo;
+  /**
+   * Present when the request was authenticated with an API key (Phase 6
+   * Unit 4, PRD §76/§77). The key acts on behalf of `user` (its creator),
+   * bounded to `api_key.organization_id` and to `api_key.scopes`; `session`
+   * is then a synthetic, non-persisted descriptor (`requireSession` refuses
+   * such principals on session-management routes).
+   */
+  api_key?: ApiKeyPrincipal;
 }
+
+/** `expires_at` reported for a non-expiring API key's synthetic session. */
+const API_KEY_SESSION_FOREVER = "9999-12-31T23:59:59.000Z";
 
 export class AuthService {
   private readonly sessionTtlSeconds: number;
@@ -197,6 +209,26 @@ export class AuthService {
     if (!user || user.status !== "ACTIVE") return null;
     await this.repo.touchSession(session.id);
     return { user: toPublicUser(user), session: toSessionInfo(session) };
+  }
+
+  /**
+   * Build the request principal for an already-verified API key (Phase 6
+   * Unit 4). The key acts on behalf of its creator, so that user must still
+   * exist and be ACTIVE — a key whose creator was terminated or deleted is
+   * refused (fail closed) rather than acting as a user-less ghost. The
+   * `session` is synthetic (`apikey:<key_id>`, never persisted) so callers
+   * that need a real session must check `requireSession`.
+   */
+  async authenticateApiKey(principal: ApiKeyPrincipal, now: Date = new Date()): Promise<AuthenticatedContext | null> {
+    if (!principal.created_by_user_id) return null;
+    const user = await this.repo.findUserById(principal.created_by_user_id);
+    if (!user || user.status !== "ACTIVE") return null;
+    const iso = now.toISOString();
+    return {
+      user: toPublicUser(user),
+      session: { id: `apikey:${principal.key_id}`, created_at: iso, last_seen_at: iso, expires_at: principal.expires_at ?? API_KEY_SESSION_FOREVER },
+      api_key: principal,
+    };
   }
 
   async logout(ctx: AuthenticatedContext, meta: RequestMeta): Promise<void> {

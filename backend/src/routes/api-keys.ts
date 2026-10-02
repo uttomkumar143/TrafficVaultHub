@@ -19,6 +19,7 @@ import { AppError } from "../lib/errors";
 import { parsePageRequest } from "../lib/pagination";
 import { requestMeta as meta } from "../lib/request-meta";
 import { parseJsonBody } from "../lib/validation";
+import { requireSession } from "../middleware/require-auth";
 import { requirePermission } from "../middleware/require-org";
 import { ApiKeyRepository } from "../modules/api-keys/repository";
 import { ApiKeyService, NAME_MAX_LENGTH, SCOPE_MAX_COUNT } from "../modules/api-keys/service";
@@ -53,7 +54,7 @@ apiKeyRoutes.get("/", requirePermission("api_keys.read"), async (c) => {
   return c.json(result, 200);
 });
 
-apiKeyRoutes.post("/", requirePermission("api_keys.manage"), async (c) => {
+apiKeyRoutes.post("/", requireSession, requirePermission("api_keys.manage"), async (c) => {
   const body = await parseJsonBody(c, createSchema);
   const api_key = await buildApiKeyService(c).create(c.get("auth"), c.get("tenant"), body, meta(c));
   c.header("cache-control", "no-store");
@@ -65,13 +66,13 @@ apiKeyRoutes.get("/:keyId", requirePermission("api_keys.read"), async (c) => {
   return c.json({ api_key }, 200);
 });
 
-apiKeyRoutes.post("/:keyId/rotate", requirePermission("api_keys.manage"), async (c) => {
+apiKeyRoutes.post("/:keyId/rotate", requireSession, requirePermission("api_keys.manage"), async (c) => {
   const api_key = await buildApiKeyService(c).rotate(c.get("auth"), c.get("tenant"), keyId(c), meta(c));
   c.header("cache-control", "no-store");
   return c.json({ api_key }, 201);
 });
 
-apiKeyRoutes.post("/:keyId/revoke", requirePermission("api_keys.manage"), async (c) => {
+apiKeyRoutes.post("/:keyId/revoke", requireSession, requirePermission("api_keys.manage"), async (c) => {
   const api_key = await buildApiKeyService(c).revoke(c.get("auth"), c.get("tenant"), keyId(c), meta(c));
   return c.json({ api_key }, 200);
 });

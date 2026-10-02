@@ -81,8 +81,12 @@ export interface CreateApiKeyInput {
 export interface ApiKeyPrincipal {
   key_id: string;
   organization_id: string;
+  /** The user the key acts on behalf of (its creator); null once that user row is gone. */
+  created_by_user_id: string | null;
   scopes: string[];
   status: Extract<ApiKeyStatus, "ACTIVE" | "ROTATED">;
+  expires_at: string | null;
+  key_prefix: string;
 }
 
 export function isApiKeyStatus(value: string): value is ApiKeyStatus {
@@ -229,7 +233,15 @@ export class ApiKeyService {
       return null;
     }
     await this.repo.touchLastUsed(row.id, now.toISOString());
-    return { key_id: row.id, organization_id: row.organization_id, scopes: JSON.parse(row.scopes) as string[], status: row.status };
+    return {
+      key_id: row.id,
+      organization_id: row.organization_id,
+      created_by_user_id: row.created_by_user_id,
+      scopes: JSON.parse(row.scopes) as string[],
+      status: row.status,
+      expires_at: row.expires_at,
+      key_prefix: row.key_prefix,
+    };
   }
 
   // ---- internals ---------------------------------------------------------------

@@ -279,7 +279,9 @@ describe("api keys — authenticate (PRD §116 'invalid API key rejected')", () 
 
     expect(dbRow(k.id).last_used_at).toBeNull();
     const principal = await svc.authenticate(k.key!);
-    expect(principal).toEqual({ key_id: k.id, organization_id: a.orgId, scopes: ["offers.read"], status: "ACTIVE" });
+    expect(principal).toMatchObject({ key_id: k.id, organization_id: a.orgId, scopes: ["offers.read"], status: "ACTIVE", expires_at: null });
+    expect(principal?.created_by_user_id).toEqual(expect.any(String));
+    expect(principal?.key_prefix).toBe(k.key_prefix);
     expect(dbRow(k.id).last_used_at).not.toBeNull();
     const seen = (await json<{ api_key: ApiKey }>(await h.as(a.owner, "GET", K(a.orgId, `/${k.id}`)))).api_key;
     expect(seen.last_used_at).toBe(dbRow(k.id).last_used_at);

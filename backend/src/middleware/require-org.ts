@@ -72,12 +72,28 @@ export const requireOrg: MiddlewareHandler<AppEnv> = async (c, next) => {
   const parsed = idSchema.safeParse(c.req.param(ORG_PARAM));
   if (!parsed.success) throw notFound();
 
-  const tenant = await c.get("organizationService").resolveTenant(auth, parsed.data);
-  if (!tenant) throw notFound();
+  // API-key principal (Phase 6 Unit 4): the key is bound to exactly one
+  // organization. Any other `:orgId` is answered like a non-membership (404,
+  // no enumeration), even if the key's creator happens to be a member there.
+  if (auth.api_key && auth.api_key.organization_id !== parsed.data) throw notFound();
+
+  const resolved = await c.get("organizationService").resolveTenant(auth, parsed.data);
+  if (!resolved) throw notFound();
+
+  // Scope intersection (PRD §77): a key can never exceed its creator's role,
+  // and never exceed the scopes it was issued with. No scopes → no permissions.
+  const tenant: TenantContext = auth.api_key
+    ? { ...resolved, permissions: intersectScopes(resolved.permissions, auth.api_key.scopes) }
+    : resolved;
 
   c.set("tenant", tenant);
   await next();
 };
+
+function intersectScopes(permissions: ReadonlySet<string>, scopes: readonly string[]): ReadonlySet<string> {
+  const allowed = new Set(scopes);
+  return new Set(Array.from(permissions).filter((p) => allowed.has(p)));
+}
 
 /**
  * Guard factory: the resolved role must hold `key`. Must be placed after

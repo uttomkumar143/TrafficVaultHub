@@ -31,6 +31,27 @@ export function hashSecret(raw: string): Promise<string> {
  * Extract a bearer session secret from an Authorization header.
  * Returns null when the header is absent or not in the expected shape.
  */
+/** Credential kinds a bearer header may carry (Phase 6 Unit 4). */
+export type BearerKind = "session" | "api_key";
+
+/** Public prefix of API keys (`modules/api-keys/service.ts` mints them). */
+export const API_KEY_TOKEN_PREFIX = "tvh_k_";
+
+/**
+ * Classify a bearer token by prefix WITHOUT validating it. Returns null when
+ * the header is absent, not Bearer, or the token has an unknown prefix — the
+ * caller must treat all three identically (401) so prefixes cannot be probed.
+ */
+export function extractBearerToken(authorization: string | undefined): { kind: BearerKind; raw: string } | null {
+  if (!authorization) return null;
+  const m = /^Bearer\s+(\S+)$/i.exec(authorization.trim());
+  if (!m) return null;
+  const token = m[1] ?? "";
+  if (token.startsWith(SESSION_TOKEN_PREFIX)) return { kind: "session", raw: token };
+  if (token.startsWith(API_KEY_TOKEN_PREFIX)) return { kind: "api_key", raw: token };
+  return null;
+}
+
 export function extractBearerSession(authorization: string | undefined): string | null {
   if (!authorization) return null;
   const m = /^Bearer\s+(\S+)$/i.exec(authorization.trim());
