@@ -40,6 +40,9 @@
  *   /:orgId/webhooks(/*)                → routes/webhooks.ts     webhookRoutes           (Phase 6 Unit 4, any tenant)
  *   /:orgId/platform/webhooks/{process-due,tenants/:tenantOrgId/...}
  *                                       → routes/webhooks.ts     platformWebhookRoutes   (Phase 6 Unit 4, PLATFORM org)
+ *   /:orgId/notifications(/*)           → routes/notifications.ts notificationRoutes     (Phase 6 Unit 6, any tenant — own feed + preferences)
+ *   /:orgId/platform/notifications/tenants/:tenantOrgId/events
+ *                                       → routes/notifications.ts platformNotificationRoutes (Phase 6 Unit 6, PLATFORM org producer face)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -64,6 +67,7 @@ import { ledgerRoutes, platformLedgerRoutes } from "./ledger";
 import { payoutRoutes, platformPayoutRoutes } from "./payouts";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 import { platformWebhookRoutes, webhookRoutes } from "./webhooks";
+import { notificationRoutes, platformNotificationRoutes } from "./notifications";
 
 const nameSchema = z.string().trim().min(2).max(120);
 const slugSchema = z
@@ -121,6 +125,8 @@ organizationRoutes.route("/:orgId/platform", platformLedgerRoutes);
 organizationRoutes.route("/:orgId/platform", platformBillingRoutes);
 // Phase 6 Unit 4 — platform webhook face (/platform/webhooks/process-due, /platform/webhooks/tenants/:tenantOrgId/...), same ordering rule.
 organizationRoutes.route("/:orgId/platform", platformWebhookRoutes);
+// Phase 6 Unit 6 — platform notification producer face (/platform/notifications/tenants/:tenantOrgId/events), same ordering rule.
+organizationRoutes.route("/:orgId/platform", platformNotificationRoutes);
 
 // Phase 2 sub-modules (each route adds its own requirePermission).
 organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
@@ -172,6 +178,8 @@ organizationRoutes.route("/:orgId/api-keys", apiKeyRoutes);
 
 // Phase 6 Unit 4 — webhook subscriptions + delivery log (secret shown once; ciphertext never selected by a read path).
 organizationRoutes.route("/:orgId/webhooks", webhookRoutes);
+// Phase 6 Unit 6 — own in-app feed + preferences (every tenant role holds notifications.read).
+organizationRoutes.route("/:orgId/notifications", notificationRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);
