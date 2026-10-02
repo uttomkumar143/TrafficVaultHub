@@ -43,7 +43,9 @@ export class TestHarness {
   constructor(options: Omit<CreateAppOptions, "emailSender"> = {}) {
     this.db = createTestD1();
     this.mail = new MemoryEmailSender();
-    this.app = createApp({ ...options, emailSender: this.mail });
+    // Rate limiting is OFF for shared fixtures: RBAC suites log in dozens of
+    // users from one (absent) IP. `middleware/rate-limit.test.ts` opts in.
+    this.app = createApp({ rateLimit: { enabled: false }, ...options, emailSender: this.mail });
     this.env = { DB: this.db, APP_ENV: "test", API_VERSION: "v1" };
   }
 

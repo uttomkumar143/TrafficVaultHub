@@ -231,7 +231,7 @@ describe("api keys HTTP — state machine enforced at the service layer", () => 
     // Envelope shape only — no stack trace, no SQLite / trigger text leaks.
     const text = JSON.stringify(await (await h.as(a.owner, "POST", K(a.orgId, `/${k1.id}/revoke`))).json());
     expect(text).not.toMatch(/SQLITE|RAISE|trg_|\bat\s+\w+\s*\(/);
-    expect(JSON.parse(text)).toEqual({ error: { code: "API_KEY_FINAL", message: expect.any(String), request_id: null } });
+    expect(JSON.parse(text)).toEqual({ error: { code: "API_KEY_FINAL", message: expect.any(String), request_id: expect.any(String) } });
 
     // Revoked keys never authenticate.
     const svc = new ApiKeyService(new ApiKeyRepository(h.db), h.db);

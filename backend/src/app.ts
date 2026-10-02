@@ -13,6 +13,7 @@ import {
 } from "./integrations";
 import type { AppEnv } from "./lib/bindings";
 import { AppError, errorResponse, requestId } from "./lib/errors";
+import { createRateLimiter, KvRateLimitStore, MemoryRateLimitStore, type RateLimiterOptions, type RateLimitStore } from "./middleware/rate-limit";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { AdvertiserRepository } from "./modules/advertisers/repository";
 import { AdvertiserService } from "./modules/advertisers/service";
@@ -63,6 +64,12 @@ export interface CreateAppOptions {
   notificationAdapter?: NotificationAdapter;
   crmAdapter?: CRMAdapter;
   fraudAdapter?: FraudAdapter;
+  /**
+   * Phase 6 Unit 2 — PRD §128 tiered rate limiting. Default: enabled, memory
+   * store per isolate, or best-effort KV when the CACHE binding is present.
+   * Tests pass `{ enabled: false }` or a tightened `tiers` map.
+   */
+  rateLimit?: RateLimiterOptions;
 }
 
 /**
@@ -84,6 +91,22 @@ export function createApp(options: CreateAppOptions = {}) {
   // PRD §72 — `request_id` always present (Phase 6 Unit 1): resolved first,
   // echoed as `x-request-id` on every response including errors / 404s.
   app.use("*", requestIdMiddleware);
+
+  // PRD §128 — one tier per request, classified by path (Phase 6 Unit 2).
+  // Store resolution is lazy: KV when bound (shared across isolates), else
+  // memory. A single limiter instance per app so counters persist across
+  // requests in the same isolate.
+  const memoryStore = new MemoryRateLimitStore();
+  let kvStore: RateLimitStore | undefined;
+  const lazyStore: RateLimitStore = {
+    increment: (key, exp, now) => (kvStore ?? memoryStore).increment(key, exp, now),
+  };
+  const limiter = createRateLimiter({ store: lazyStore, ...options.rateLimit });
+  const rateLimitAuto = limiter.auto();
+  app.use("*", async (c, next) => {
+    if (!options.rateLimit?.store && !kvStore && c.env?.CACHE) kvStore = new KvRateLimitStore(c.env.CACHE);
+    return rateLimitAuto(c, next);
+  });
 
   // PRD §72 — uniform error envelope, no stack traces exposed.
   app.notFound((c) =>

@@ -17,7 +17,8 @@ describe("requestMeta (shared audit metadata helper)", () => {
   });
 
   it("yields nulls (never undefined / never a spoofable fallback) when headers are absent", async () => {
-    expect(await capture({})).toEqual({ ip_address: null, user_agent: null, request_id: null });
+    // Phase 6 Unit 1: request_id is ALWAYS present (generated UUID), never null.
+    expect(await capture({})).toEqual({ ip_address: null, user_agent: null, request_id: expect.any(String) });
   });
 
   it("bounds the stored user agent length", async () => {
