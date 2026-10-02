@@ -18,9 +18,27 @@
  *   A matched pair may yield several mismatches (one case per type) so the
  *   reviewer sees every discrepancy, not only the first.
  *
- * Ledger: ledger_status is written as NOT_AVAILABLE — there is no ledger until
- *   Phase 5 and this module never emits LEDGER_MISMATCH. Reported honestly
- *   rather than claiming MATCHED.
+ * Ledger side (Phase 5 Unit 15, §114 #6): the run also compares, for the SAME
+ *   tenant and period and in integer minor units of ONE currency per pair,
+ *     conversions (occurred_at in period) ↔ commissions ↔ posted journal
+ *       (journal_entries, reference_type CONVERSION, reference_id = conversion)
+ *     PAID payouts (paid_at in period) ↔ PAYOUT journals (reference_id = payout)
+ *   and writes ledger_status MATCHED | MISMATCHED plus one LEDGER_MISMATCH case
+ *   per discrepancy (detail code in tvh_status, see LEDGER_DETAIL):
+ *     COMMISSION_MISSING          ledger-bearing lifecycle, no commissions row
+ *     JOURNAL_MISSING             commission whose journal is not a CONVERSION
+ *                                 journal of that conversion (tampered / missing)
+ *     JOURNAL_AMOUNT_MISMATCH     journal total ≠ commission debit total
+ *     JOURNAL_CURRENCY_MISMATCH   journal currency ≠ commission currency
+ *     COMMISSION_WITHOUT_POSTING  commission on a conversion that never reached
+ *                                 LEDGER_POSTED (pre-posting lifecycle)
+ *     JOURNAL_WITHOUT_COMMISSION  CONVERSION journal no commission points at
+ *     PAYOUT_JOURNAL_MISSING      PAID payout with no PAYOUT journal
+ *     PAYOUT_JOURNAL_MISMATCH     PAYOUT journal amount / currency ≠ payout
+ *   For LEDGER_MISMATCH cases reported_* carries the JOURNAL side and tvh_*
+ *   the commission / payout side; payout cases carry `payout:<id>` in
+ *   external_conversion_id (conversion_id NULL). NOT_AVAILABLE is no longer
+ *   written by this service (still the column default for legacy rows).
  *
  * Persistence (repository in this file, migration 0009): a run writes the
  *   reconciliation_runs row + every reconciliation_cases row + the audit row in
@@ -54,11 +72,40 @@ import type { PermissionKey } from "../rbac/permissions";
 // Types
 // ---------------------------------------------------------------------------
 
-/** Mismatch types this engine can emit. LEDGER_MISMATCH exists in the schema but is never produced before Phase 5. */
+/** Mismatch types the advertiser-report diff emits. */
 export const MISMATCH_TYPES = ["MISSING_IN_TVH", "MISSING_AT_ADVERTISER", "CURRENCY_MISMATCH", "AMOUNT_MISMATCH", "STATUS_MISMATCH"] as const;
 export type MismatchType = (typeof MISMATCH_TYPES)[number];
-/** Every value the reconciliation_cases.mismatch_type CHECK admits (rows read back). */
+/** Every value the reconciliation_cases.mismatch_type CHECK admits (LEDGER_MISMATCH comes from the ledger side, Phase 5 Unit 15). */
 export type StoredMismatchType = MismatchType | "LEDGER_MISMATCH";
+
+/** Detail codes of LEDGER_MISMATCH cases (stored in reconciliation_cases.tvh_status). */
+export const LEDGER_DETAIL = [
+  "COMMISSION_MISSING",
+  "JOURNAL_MISSING",
+  "JOURNAL_AMOUNT_MISMATCH",
+  "JOURNAL_CURRENCY_MISMATCH",
+  "COMMISSION_WITHOUT_POSTING",
+  "JOURNAL_WITHOUT_COMMISSION",
+  "PAYOUT_JOURNAL_MISSING",
+  "PAYOUT_JOURNAL_MISMATCH",
+] as const;
+export type LedgerDetail = (typeof LEDGER_DETAIL)[number];
+
+export interface LedgerMismatch {
+  mismatch_type: "LEDGER_MISMATCH";
+  conversion_id: string | null;
+  /** conversion external id, or `payout:<payoutId>` for payout cases. */
+  external_conversion_id: string | null;
+  /** Journal side (what the ledger holds). */
+  reported_amount_minor: number | null;
+  /** Commission / payout side (what should have been posted). */
+  tvh_amount_minor: number | null;
+  reported_status: null;
+  tvh_status: LedgerDetail;
+}
+
+/** Any row insertable into reconciliation_cases. */
+export type CaseInsert = Mismatch | LedgerMismatch;
 
 export const RECONCILED_STATUSES = ["APPROVED", "REJECTED", "PENDING"] as const;
 export type ReconciledStatus = (typeof RECONCILED_STATUSES)[number];
@@ -271,6 +318,109 @@ export function isCheckViolation(err: unknown): boolean {
   return /CHECK constraint failed/i.test(msg);
 }
 
+// ---------------------------------------------------------------------------
+// Ledger side (Phase 5 Unit 15) — pure core over rows the repository loads
+// ---------------------------------------------------------------------------
+
+/** Lifecycle states that MUST carry a commission + posted CONVERSION journal. */
+const LEDGER_BEARING: ReadonlySet<ConversionStatus> = new Set<ConversionStatus>(["LEDGER_POSTED", "EARNED", "PAYOUT_ELIGIBLE", "PAID", "REVERSED"]);
+/** Lifecycle states that MUST NOT carry a commission yet (posting happens at APPROVED → LEDGER_POSTED). */
+const PRE_POSTING: ReadonlySet<ConversionStatus> = new Set<ConversionStatus>(["RECEIVED", "VALIDATING", "PENDING", "APPROVED", "REJECTED"]);
+
+export interface ConversionLedgerRow {
+  conversion_id: string;
+  external_conversion_id: string;
+  lifecycle_status: ConversionStatus;
+  commission_id: string | null;
+  commission_currency: string | null;
+  /** The journal's expected DEBIT total: advertiser_payout_minor ?? affiliate_commission_minor. */
+  commission_total_minor: number | null;
+  /** Journal matched on id + organization + reference_type CONVERSION + reference_id = conversion; NULL when absent / tampered. */
+  journal_id: string | null;
+  journal_currency: string | null;
+  journal_total_minor: number | null;
+}
+
+export interface OrphanJournalRow {
+  journal_id: string;
+  reference_id: string;
+  conversion_id: string | null;
+  external_conversion_id: string | null;
+  currency: string;
+  total_minor: number;
+}
+
+export interface PayoutLedgerRow {
+  payout_id: string;
+  amount_minor: number;
+  currency: string;
+  journal_id: string | null;
+  journal_currency: string | null;
+  journal_total_minor: number | null;
+}
+
+export interface LedgerFacts {
+  conversions: ConversionLedgerRow[];
+  orphan_journals: OrphanJournalRow[];
+  paid_payouts: PayoutLedgerRow[];
+}
+
+function ledgerCase(
+  detail: LedgerDetail,
+  conversionId: string | null,
+  externalId: string | null,
+  journalMinor: number | null,
+  expectedMinor: number | null,
+): LedgerMismatch {
+  return {
+    mismatch_type: "LEDGER_MISMATCH",
+    conversion_id: conversionId,
+    external_conversion_id: externalId,
+    reported_amount_minor: journalMinor,
+    tvh_amount_minor: expectedMinor,
+    reported_status: null,
+    tvh_status: detail,
+  };
+}
+
+/** Integer-minor-unit comparison; currencies are compared first so amounts of different currencies are never compared. */
+export function diffLedger(facts: LedgerFacts): LedgerMismatch[] {
+  const out: LedgerMismatch[] = [];
+  for (const r of facts.conversions) {
+    if (r.commission_id === null) {
+      if (LEDGER_BEARING.has(r.lifecycle_status)) out.push(ledgerCase("COMMISSION_MISSING", r.conversion_id, r.external_conversion_id, null, null));
+      continue;
+    }
+    if (PRE_POSTING.has(r.lifecycle_status)) {
+      out.push(ledgerCase("COMMISSION_WITHOUT_POSTING", r.conversion_id, r.external_conversion_id, r.journal_total_minor, r.commission_total_minor));
+      continue;
+    }
+    if (r.journal_id === null) {
+      out.push(ledgerCase("JOURNAL_MISSING", r.conversion_id, r.external_conversion_id, null, r.commission_total_minor));
+      continue;
+    }
+    if (r.journal_currency !== r.commission_currency) {
+      out.push(ledgerCase("JOURNAL_CURRENCY_MISMATCH", r.conversion_id, r.external_conversion_id, r.journal_total_minor, r.commission_total_minor));
+      continue;
+    }
+    if (r.journal_total_minor !== r.commission_total_minor) {
+      out.push(ledgerCase("JOURNAL_AMOUNT_MISMATCH", r.conversion_id, r.external_conversion_id, r.journal_total_minor, r.commission_total_minor));
+    }
+  }
+  for (const j of facts.orphan_journals) {
+    out.push(ledgerCase("JOURNAL_WITHOUT_COMMISSION", j.conversion_id, j.external_conversion_id, j.total_minor, null));
+  }
+  for (const p of facts.paid_payouts) {
+    const key = `payout:${p.payout_id}`;
+    if (p.journal_id === null) {
+      out.push(ledgerCase("PAYOUT_JOURNAL_MISSING", null, key, null, p.amount_minor));
+    } else if (p.journal_currency !== p.currency || p.journal_total_minor !== p.amount_minor) {
+      out.push(ledgerCase("PAYOUT_JOURNAL_MISMATCH", null, key, p.journal_total_minor, p.amount_minor));
+    }
+  }
+  return out;
+}
+
 export interface RunInsert {
   id: string;
   period_start: string;
@@ -278,6 +428,7 @@ export interface RunInsert {
   trigger: ReconciliationTrigger;
   counts: Omit<DiffResult, "mismatches">;
   mismatch_count: number;
+  ledger_status: LedgerStatus;
   started_by_user_id: string | null;
 }
 
@@ -306,7 +457,7 @@ export class ReconciliationRepository {
         `INSERT INTO reconciliation_runs
            (id, organization_id, period_start, period_end, trigger, status, reported_count, tvh_count, approved_count, rejected_count,
             mismatch_count, ledger_status, started_by_user_id, started_at, completed_at)
-         VALUES (?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?, ?, 'NOT_AVAILABLE', ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         run.id,
@@ -319,13 +470,77 @@ export class ReconciliationRepository {
         run.counts.approved_count,
         run.counts.rejected_count,
         run.mismatch_count,
+        run.ledger_status,
         run.started_by_user_id,
         now,
         now,
       );
   }
 
-  caseStatement(tenantId: TenantId, runId: string, caseId: string, m: Mismatch, now: string): D1PreparedStatement {
+  /**
+   * Ledger facts of the tenant for [start, end): every conversion of the period
+   * with its commission and the journal that commission points at (matched on
+   * id + organization + reference_type CONVERSION + reference_id = conversion,
+   * so a tampered reference reads as "no journal"); CONVERSION journals of the
+   * tenant no commission points at; PAID payouts of the tenant (paid_at in the
+   * period) with their PAYOUT journal.
+   */
+  async loadLedgerFacts(tenantId: TenantId, periodStart: string, periodEnd: string, offerId: string | null): Promise<LedgerFacts> {
+    const offerFilter = offerId ? " AND cv.offer_id = ?" : "";
+    const offerBinds = offerId ? [offerId] : [];
+    const conversions = await scopedQuery(
+      this.db,
+      `SELECT cv.id AS conversion_id, cv.external_conversion_id, cv.lifecycle_status,
+              cm.id AS commission_id, cm.currency AS commission_currency,
+              COALESCE(cm.advertiser_payout_minor, cm.affiliate_commission_minor) AS commission_total_minor,
+              j.id AS journal_id, j.currency AS journal_currency, j.total_minor AS journal_total_minor
+         FROM conversions cv
+         LEFT JOIN commissions cm ON cm.conversion_id = cv.id AND cm.organization_id = cv.organization_id
+         LEFT JOIN journal_entries j ON j.id = cm.journal_id AND j.organization_id = cv.organization_id
+              AND j.reference_type = 'CONVERSION' AND j.reference_id = cv.id
+        WHERE cv.organization_id = ? AND cv.occurred_at >= ? AND cv.occurred_at < ?${offerFilter}
+        ORDER BY cv.occurred_at, cv.id`,
+      tenantId,
+      periodStart,
+      periodEnd,
+      ...offerBinds,
+    ).all<ConversionLedgerRow>();
+    const orphans = await scopedQuery(
+      this.db,
+      `SELECT j.id AS journal_id, j.reference_id, cv.id AS conversion_id, cv.external_conversion_id, j.currency, j.total_minor
+         FROM journal_entries j
+         LEFT JOIN conversions cv ON cv.id = j.reference_id AND cv.organization_id = j.organization_id
+         LEFT JOIN commissions cm ON cm.journal_id = j.id
+        WHERE j.organization_id = ? AND j.reference_type = 'CONVERSION' AND cm.id IS NULL
+          AND ((cv.id IS NOT NULL AND cv.occurred_at >= ? AND cv.occurred_at < ?${offerFilter})
+            OR (cv.id IS NULL AND j.posted_at >= ? AND j.posted_at < ?))
+        ORDER BY j.posted_at, j.id`,
+      tenantId,
+      periodStart,
+      periodEnd,
+      ...offerBinds,
+      periodStart,
+      periodEnd,
+    ).all<OrphanJournalRow>();
+    const payouts = offerId
+      ? { results: [] as PayoutLedgerRow[] }
+      : await scopedQuery(
+          this.db,
+          `SELECT p.id AS payout_id, p.amount_minor, p.currency,
+                  j.id AS journal_id, j.currency AS journal_currency, j.total_minor AS journal_total_minor
+             FROM payouts p
+             LEFT JOIN journal_entries j ON j.id = p.journal_id AND j.organization_id = p.organization_id
+                  AND j.reference_type = 'PAYOUT' AND j.reference_id = p.id
+            WHERE p.organization_id = ? AND p.status = 'PAID' AND p.paid_at >= ? AND p.paid_at < ?
+            ORDER BY p.paid_at, p.id`,
+          tenantId,
+          periodStart,
+          periodEnd,
+        ).all<PayoutLedgerRow>();
+    return { conversions: conversions.results, orphan_journals: orphans.results, paid_payouts: payouts.results };
+  }
+
+  caseStatement(tenantId: TenantId, runId: string, caseId: string, m: CaseInsert, now: string): D1PreparedStatement {
     return this.db
       .prepare(
         `INSERT INTO reconciliation_cases
@@ -538,9 +753,13 @@ export class ReconciliationService {
     assertUniqueTvhKeys(tvh);
 
     const diff = diffConversions(reported, tvh);
+    const ledgerFacts = await this.repo.loadLedgerFacts(tenantId, input.period_start, input.period_end, offerId);
+    const ledgerMismatches = diffLedger(ledgerFacts);
+    const ledgerStatus: LedgerStatus = ledgerMismatches.length === 0 ? "MATCHED" : "MISMATCHED";
+    const allCases: CaseInsert[] = [...diff.mismatches, ...ledgerMismatches];
     const now = this.now().toISOString();
     const runId = crypto.randomUUID();
-    const caseIds = diff.mismatches.map(() => crypto.randomUUID());
+    const caseIds = allCases.map(() => crypto.randomUUID());
 
     const statements: D1PreparedStatement[] = [
       this.repo.runStatement(
@@ -551,17 +770,20 @@ export class ReconciliationService {
           period_end: input.period_end,
           trigger,
           counts: diff,
-          mismatch_count: diff.mismatches.length,
+          mismatch_count: allCases.length,
+          ledger_status: ledgerStatus,
           started_by_user_id: userId,
         },
         now,
       ),
     ];
-    diff.mismatches.forEach((m, i) => {
+    allCases.forEach((m, i) => {
       statements.push(this.repo.caseStatement(tenantId, runId, caseIds[i] as string, m, now));
     });
-    const byType: Partial<Record<MismatchType, number>> = {};
-    for (const m of diff.mismatches) byType[m.mismatch_type] = (byType[m.mismatch_type] ?? 0) + 1;
+    const byType: Partial<Record<StoredMismatchType, number>> = {};
+    for (const m of allCases) byType[m.mismatch_type] = (byType[m.mismatch_type] ?? 0) + 1;
+    const ledgerByDetail: Partial<Record<LedgerDetail, number>> = {};
+    for (const m of ledgerMismatches) ledgerByDetail[m.tvh_status] = (ledgerByDetail[m.tvh_status] ?? 0) + 1;
     statements.push(
       this.audit.statement({
         organization_id: tenantId,
@@ -578,9 +800,11 @@ export class ReconciliationService {
           tvh_count: diff.tvh_count,
           approved_count: diff.approved_count,
           rejected_count: diff.rejected_count,
-          mismatch_count: diff.mismatches.length,
+          mismatch_count: allCases.length,
           mismatches_by_type: byType,
-          ledger_status: "NOT_AVAILABLE",
+          ledger_status: ledgerStatus,
+          ledger_mismatch_count: ledgerMismatches.length,
+          ledger_mismatches_by_detail: ledgerByDetail,
         },
         meta,
       }),
