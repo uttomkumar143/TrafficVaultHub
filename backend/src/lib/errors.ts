@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { resolveRequestId } from "../middleware/request-id";
 
 /**
  * Application error carrying the PRD §72 envelope fields.
@@ -18,8 +19,13 @@ export class AppError extends Error {
   }
 }
 
+/**
+ * PRD §72 — correlation id for this request. Always a string (Phase 6 Unit 1):
+ * `cf-ray`, else a well-formed inbound `x-request-id`, else a generated UUID.
+ * Return type kept nullable for the existing `RequestMeta.request_id` column.
+ */
 export function requestId(c: Context): string | null {
-  return c.req.header("cf-ray") ?? null;
+  return resolveRequestId(c);
 }
 
 /** Serialise any error into the uniform envelope. Unknown errors become 500. */

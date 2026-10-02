@@ -12,7 +12,8 @@ import {
   type TrackingAdapter,
 } from "./integrations";
 import type { AppEnv } from "./lib/bindings";
-import { AppError, errorResponse } from "./lib/errors";
+import { AppError, errorResponse, requestId } from "./lib/errors";
+import { requestIdMiddleware } from "./middleware/request-id";
 import { AdvertiserRepository } from "./modules/advertisers/repository";
 import { AdvertiserService } from "./modules/advertisers/service";
 import { AffiliateRepository } from "./modules/affiliates/repository";
@@ -80,6 +81,10 @@ export function createApp(options: CreateAppOptions = {}) {
   const crmAdapter: CRMAdapter = options.crmAdapter ?? new NullCRMAdapter();
   const fraudAdapter: FraudAdapter = options.fraudAdapter ?? new NullFraudAdapter();
 
+  // PRD §72 — `request_id` always present (Phase 6 Unit 1): resolved first,
+  // echoed as `x-request-id` on every response including errors / 404s.
+  app.use("*", requestIdMiddleware);
+
   // PRD §72 — uniform error envelope, no stack traces exposed.
   app.notFound((c) =>
     c.json(
@@ -87,7 +92,7 @@ export function createApp(options: CreateAppOptions = {}) {
         error: {
           code: "NOT_FOUND",
           message: "Resource not found",
-          request_id: c.req.header("cf-ray") ?? null,
+          request_id: requestId(c),
         },
       },
       404,

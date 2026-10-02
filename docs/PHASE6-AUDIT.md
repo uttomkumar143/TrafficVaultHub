@@ -10,7 +10,7 @@ Baseline at `ab071e7`: typecheck 0, vitest 624/624 (68 files). Spec: `09-PHASE6-
 | 1d | §71/§128 rate limit tier per endpoint (login, API, tracking, postback, webhook, admin, public) | MISSING | `grep -ril 'rate.?limit' src` → nothing |
 | 1e | §71 idempotency where relevant | DONE | payouts (`Idempotency-Key`), webhooks publish (`idempotency_key`), postback nonce |
 | 1f | §70 version `/api/v1` | DONE | `app.ts` mounts `v1` |
-| 1g | §72 `request_id` always present | PARTIAL | `lib/errors.ts` uses `cf-ray` only → `null` outside Cloudflare; no `x-request-id` echo |
+| 1g | §72 `request_id` always present | DONE | `middleware/request-id.ts` (`cf-ray` → well-formed inbound `x-request-id` → UUID), `x-request-id` echoed on every response; `middleware/request-id.test.ts` (6) |
 | 2 | §72 `{error:{code,message,request_id}}` everywhere, no stack traces | DONE | `errorResponse`, `app.notFound`, `app.onError`; tests `routes/secret-exposure.test.ts` "error envelopes never include a stack trace or internal detail", `test/api-keys-http.test.ts` envelope checks. Only gap is 1g |
 | 3a | §76 API keys create/rotate/revoke/expire/scope/last_used | DONE | `modules/api-keys/{repository,service}.ts`, `routes/api-keys.ts`; `test/api-keys-http.test.ts` (11 tests) |
 | 3b | §76 secret never returned after creation / never logged | DONE | SHA-256 + 4-char hint stored; `test/api-keys-http.test.ts` "returns the full key ONCE; stores only hash + hint + prefix; list/get never leak it" |
