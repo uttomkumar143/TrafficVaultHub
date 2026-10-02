@@ -160,7 +160,7 @@ describe("ReconciliationService", () => {
   });
   afterEach(() => db.close());
 
-  it("a run persists the run row, one case per mismatch and the audit row in one batch; ledger_status is NOT_AVAILABLE; permission and input are checked before any write", async () => {
+  it("a run persists the run row, one case per mismatch and the audit row in one batch; ledger side flags PAID c-1 without commission (ledger_status MISMATCHED); permission and input are checked before any write", async () => {
     conversion(db, "c-1", "ext-1", "PAID"); // matches
     conversion(db, "c-2", "ext-2", "APPROVED", { amount: 1000 }); // amount mismatch
     conversion(db, "c-3", "ext-3", "APPROVED", { currency: "USD" }); // currency mismatch
@@ -197,33 +197,37 @@ describe("ReconciliationService", () => {
       tvh_count: 5,
       approved_count: 3, // c-1 PAID, c-2, c-3
       rejected_count: 1, // c-4 REVERSED
-      mismatch_count: 5,
-      ledger_status: "NOT_AVAILABLE",
+      mismatch_count: 6,
+      ledger_status: "MISMATCHED",
       started_by_user_id: USER,
       started_at: NOW.toISOString(),
       completed_at: NOW.toISOString(),
     });
     expect(byType(cases as unknown as Mismatch[])).toEqual(
-      ["AMOUNT_MISMATCH:ext-2", "CURRENCY_MISMATCH:ext-3", "STATUS_MISMATCH:ext-4", "MISSING_AT_ADVERTISER:ext-5", "MISSING_IN_TVH:ext-6"].sort(),
+      ["AMOUNT_MISMATCH:ext-2", "CURRENCY_MISMATCH:ext-3", "STATUS_MISMATCH:ext-4", "MISSING_AT_ADVERTISER:ext-5", "MISSING_IN_TVH:ext-6", "LEDGER_MISMATCH:ext-1"].sort(),
     );
     expect(cases.every((c) => c.status === "OPEN" && c.run_id === run.id && c.organization_id === ADV)).toBe(true);
     expect(cases.find((c) => c.mismatch_type === "AMOUNT_MISMATCH")).toMatchObject({ conversion_id: "c-2", reported_amount_minor: 1234, tvh_amount_minor: 1000, reported_status: "APPROVED", tvh_status: "APPROVED" });
     expect(cases.find((c) => c.mismatch_type === "STATUS_MISMATCH")).toMatchObject({ conversion_id: "c-4", reported_status: "APPROVED", tvh_status: "REJECTED" });
     expect(cases.find((c) => c.mismatch_type === "MISSING_IN_TVH")).toMatchObject({ conversion_id: null, external_conversion_id: "ext-6", reported_status: "REJECTED", reported_amount_minor: 50 });
-    expect(cases.some((c) => c.external_conversion_id === "ext-x" || c.external_conversion_id === "ext-out" || c.external_conversion_id === "ext-1")).toBe(false);
-    expect(cases.map((c) => c.mismatch_type)).not.toContain("LEDGER_MISMATCH");
+    expect(cases.some((c) => c.external_conversion_id === "ext-x" || c.external_conversion_id === "ext-out")).toBe(false);
+    // ledger side: c-1 is PAID (ledger-bearing) but no commission row exists → one LEDGER_MISMATCH case
+    expect(cases.filter((c) => c.mismatch_type === "LEDGER_MISMATCH")).toHaveLength(1);
+    expect(cases.find((c) => c.mismatch_type === "LEDGER_MISMATCH")).toMatchObject({ conversion_id: "c-1", external_conversion_id: "ext-1", tvh_status: "COMMISSION_MISSING" });
 
     // DB truth
-    expect(count(db, "SELECT COUNT(*) AS n FROM reconciliation_cases WHERE run_id = ?", run.id)).toBe(5);
-    expect(db.sqlite.prepare("SELECT ledger_status FROM reconciliation_runs WHERE id = ?").get(run.id)).toEqual({ ledger_status: "NOT_AVAILABLE" });
+    expect(count(db, "SELECT COUNT(*) AS n FROM reconciliation_cases WHERE run_id = ?", run.id)).toBe(6);
+    expect(db.sqlite.prepare("SELECT ledger_status FROM reconciliation_runs WHERE id = ?").get(run.id)).toEqual({ ledger_status: "MISMATCHED" });
     expect(audits(db, "reconciliation.run.completed")).toBe(1);
     const audit = db.sqlite.prepare("SELECT actor_user_id, organization_id, target_id, metadata, request_id FROM audit_logs WHERE action = 'reconciliation.run.completed'").get() as Record<string, string>;
     expect(audit).toMatchObject({ actor_user_id: USER, organization_id: ADV, target_id: run.id, request_id: "req-1" });
     expect(JSON.parse(audit.metadata!)).toMatchObject({
       trigger: "MANUAL",
-      mismatch_count: 5,
-      ledger_status: "NOT_AVAILABLE",
-      mismatches_by_type: { AMOUNT_MISMATCH: 1, CURRENCY_MISMATCH: 1, STATUS_MISMATCH: 1, MISSING_AT_ADVERTISER: 1, MISSING_IN_TVH: 1 },
+      mismatch_count: 6,
+      ledger_status: "MISMATCHED",
+      ledger_mismatch_count: 1,
+      ledger_mismatches_by_detail: { COMMISSION_MISSING: 1 },
+      mismatches_by_type: { AMOUNT_MISMATCH: 1, CURRENCY_MISMATCH: 1, STATUS_MISMATCH: 1, MISSING_AT_ADVERTISER: 1, MISSING_IN_TVH: 1, LEDGER_MISMATCH: 1 },
     });
 
     // reads: getRun returns the same cases; reader may read, nobody may not
@@ -269,7 +273,8 @@ describe("ReconciliationService", () => {
   it("runScheduled needs no permission, records trigger SCHEDULED with NULL actor; cross-offer external-id collisions are refused unless offer-scoped", async () => {
     conversion(db, "c-1", "ext-1", "APPROVED");
     const res = await svc.runScheduled(T_ADV, { ...PERIOD, reported: [], request_id: "cron-1" });
-    expect(res.run).toMatchObject({ trigger: "SCHEDULED", started_by_user_id: null, tvh_count: 1, reported_count: 0, mismatch_count: 1, ledger_status: "NOT_AVAILABLE" });
+    // c-1 is APPROVED (pre-posting): no commission expected → ledger side is clean
+    expect(res.run).toMatchObject({ trigger: "SCHEDULED", started_by_user_id: null, tvh_count: 1, reported_count: 0, mismatch_count: 1, ledger_status: "MATCHED" });
     expect(res.cases[0]).toMatchObject({ mismatch_type: "MISSING_AT_ADVERTISER", conversion_id: "c-1" });
     const audit = db.sqlite.prepare("SELECT actor_user_id, organization_id, request_id FROM audit_logs WHERE action = 'reconciliation.run.completed'").get();
     expect(audit).toEqual({ actor_user_id: null, organization_id: ADV, request_id: "cron-1" });
