@@ -66,6 +66,22 @@ export const PERMISSION_KEYS = [
   "billing.read",
   "billing.manage",
   "payouts.request",
+  // API keys, webhooks, notifications, support, disputes, appeals (Phase 6 Unit 8, migration 0012)
+  "api_keys.read",
+  "api_keys.manage",
+  "webhooks.read",
+  "webhooks.manage",
+  "webhooks.replay",
+  "notifications.read",
+  "support.read",
+  "support.create",
+  "support.manage",
+  "disputes.read",
+  "disputes.create",
+  "disputes.manage",
+  "appeals.read",
+  "appeals.create",
+  "appeals.manage",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];

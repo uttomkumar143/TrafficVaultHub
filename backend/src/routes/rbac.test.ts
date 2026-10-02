@@ -146,15 +146,19 @@ describe("permission resolution (user → membership → role → permissions)",
     expect((await me(owner, org.id)).permissions).toEqual(
       expect.arrayContaining(["organizations.update", "members.manage", "payouts.read", "audit.read"]),
     );
-    // VIEWER is the shared read-only tenant role (0004 + 0005 + 0006 + 0008 read keys).
+    // VIEWER is the shared read-only tenant role (0004 + 0005 + 0006 + 0008 + 0012 read keys).
     expect((await me(vwr, org.id)).permissions).toEqual([
       "advertisers.read",
       "affiliates.read",
+      "appeals.read",
       "attribution.read",
       "conversions.read",
+      "disputes.read",
       "members.read",
+      "notifications.read",
       "offers.read",
       "organizations.read",
+      "support.read",
       "tracking.read",
     ]);
     // 0008: only AFFILIATE_OWNER / AFFILIATE_MANAGER may manage tracking links; nobody on the

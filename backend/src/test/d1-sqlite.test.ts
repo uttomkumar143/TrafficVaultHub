@@ -20,6 +20,9 @@ describe("test D1 shim", () => {
       "affiliate_profiles",
       "affiliate_status_transitions",
       "affiliate_traffic_sources",
+      "api_keys",
+      "appeal_decisions",
+      "appeals",
       "attribution_policies",
       "attributions",
       "audit_logs",
@@ -36,6 +39,9 @@ describe("test D1 shim", () => {
       "conversion_reversals",
       "conversion_status_history",
       "conversions",
+      "dispute_decisions",
+      "dispute_evidence",
+      "disputes",
       "financial_adjustment_history",
       "financial_adjustments",
       "financial_processing_errors",
@@ -47,6 +53,8 @@ describe("test D1 shim", () => {
       "journal_entries",
       "ledger_accounts",
       "ledger_entries",
+      "notification_preferences",
+      "notifications",
       "offer_cap_counters",
       "offer_status_transitions",
       "offer_version_targeting",
@@ -69,9 +77,17 @@ describe("test D1 shim", () => {
       "sessions",
       "smartlink_offers",
       "smartlinks",
+      "support_agent_tenant_access",
+      "support_ticket_events",
+      "support_ticket_messages",
+      "support_tickets",
       "tracking_links",
       "user_credentials",
       "users",
+      "webhook_deliveries",
+      "webhook_delivery_attempts",
+      "webhook_events",
+      "webhook_subscriptions",
     ]);
   });
 
@@ -125,6 +141,11 @@ describe("test D1 shim", () => {
       "affiliates.manage",
       "affiliates.read",
       "affiliates.review",
+      "api_keys.manage",
+      "api_keys.read",
+      "appeals.create",
+      "appeals.manage",
+      "appeals.read",
       "attribution.manage",
       "attribution.read",
       "audit.read",
@@ -137,6 +158,9 @@ describe("test D1 shim", () => {
       "conversions.read",
       "conversions.reject",
       "conversions.reverse",
+      "disputes.create",
+      "disputes.manage",
+      "disputes.read",
       "fraud.manage",
       "fraud.read",
       "fraud.review",
@@ -146,6 +170,7 @@ describe("test D1 shim", () => {
       "ledger.reserve",
       "members.manage",
       "members.read",
+      "notifications.read",
       "offers.approve",
       "offers.create",
       "offers.pause",
@@ -160,8 +185,14 @@ describe("test D1 shim", () => {
       "payouts.review",
       "reconciliation.manage",
       "reconciliation.read",
+      "support.create",
+      "support.manage",
+      "support.read",
       "tracking.manage",
       "tracking.read",
+      "webhooks.manage",
+      "webhooks.read",
+      "webhooks.replay",
     ]);
 
     const grants = await db
@@ -185,11 +216,15 @@ describe("test D1 shim", () => {
     expect(byRole.get("VIEWER")).toEqual([
       "advertisers.read",
       "affiliates.read",
+      "appeals.read",
       "attribution.read",
       "conversions.read",
+      "disputes.read",
       "members.read",
+      "notifications.read",
       "offers.read",
       "organizations.read",
+      "support.read",
       "tracking.read",
     ]);
 
@@ -241,6 +276,37 @@ describe("test D1 shim", () => {
     }
     expect(byRole.get("AFFILIATE_USER")!.filter((k) => k === "payouts.request")).toEqual([]);
     expect(byRole.get("COMPLIANCE_MANAGER")!.filter((k) => k.startsWith("billing."))).toEqual([]);
+    // 0012: replay / decide / agent-manage are platform powers; tenant owners self-serve keys, webhooks,
+    // tickets, disputes and appeals; every tenant role reads its own notifications; VIEWER never manages.
+    for (const role of ["SUPER_ADMIN", "OPERATIONS_ADMIN"]) {
+      expect(byRole.get(role), role).toEqual(
+        expect.arrayContaining(["webhooks.replay", "support.manage", "disputes.manage", "appeals.manage"]),
+      );
+    }
+    expect(byRole.get("SUPPORT_AGENT")).toEqual(expect.arrayContaining(["support.read", "support.manage"]));
+    expect(byRole.get("SUPPORT_AGENT")!.filter((k) => ["disputes.manage", "appeals.manage", "webhooks.replay"].includes(k))).toEqual([]);
+    expect(byRole.get("COMPLIANCE_MANAGER")).toEqual(expect.arrayContaining(["appeals.manage", "disputes.manage"]));
+    expect(byRole.get("FINANCE_MANAGER")).toEqual(expect.arrayContaining(["disputes.manage"]));
+    expect(byRole.get("FINANCE_MANAGER")!.filter((k) => k === "appeals.manage")).toEqual([]);
+    for (const role of ["ADVERTISER_OWNER", "AFFILIATE_OWNER"]) {
+      expect(byRole.get(role), role).toEqual(
+        expect.arrayContaining([
+          "api_keys.manage",
+          "webhooks.manage",
+          "support.create",
+          "disputes.create",
+          "appeals.create",
+          "notifications.read",
+        ]),
+      );
+    }
+    for (const role of ["CAMPAIGN_MANAGER", "BILLING_MANAGER", "AFFILIATE_USER"]) {
+      expect(byRole.get(role)!.filter((k) => k === "api_keys.manage" || k === "webhooks.manage"), role).toEqual([]);
+      expect(byRole.get(role), role).toEqual(expect.arrayContaining(["api_keys.read", "support.create", "notifications.read"]));
+    }
+    expect(byRole.get("VIEWER")!.filter((k) => k.startsWith("api_keys.") || k.startsWith("webhooks.") || k.endsWith(".create"))).toEqual([]);
+    expect(byRole.get("VIEWER")).toEqual(expect.arrayContaining(["notifications.read"]));
+    for (const [role, keys] of byRole) expect(keys, role).toContain("notifications.read");
 
     // Network-only powers never reach tenant roles (PRD §11 separation of duties).
     const networkOnly = [
@@ -258,9 +324,13 @@ describe("test D1 shim", () => {
       "ledger.approve",
       "ledger.reserve",
       "billing.manage",
+      "webhooks.replay",
+      "support.manage",
+      "disputes.manage",
+      "appeals.manage",
     ];
     for (const [role, keys] of byRole) {
-      if (["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_MANAGER", "COMPLIANCE_MANAGER"].includes(role)) continue;
+      if (["SUPER_ADMIN", "OPERATIONS_ADMIN", "FINANCE_MANAGER", "COMPLIANCE_MANAGER", "SUPPORT_AGENT"].includes(role)) continue;
       expect(
         keys.filter((k) => networkOnly.includes(k)),
         role,
@@ -520,5 +590,124 @@ describe("test D1 shim", () => {
 
     // unique index on lower(email)
     await expect(db.prepare("INSERT INTO users (id, email) VALUES (?, ?)").bind("u2", "A@EXAMPLE.COM").run()).rejects.toThrow();
+  });
+
+  it("applies 0012: api keys / webhooks / notifications / support / disputes / appeals are state-machine- and tenant-guarded at the database (PRD §73–§76, §80–§83)", async () => {
+    db = createTestD1();
+    const run = (sql: string) => db.prepare(sql).run();
+    db.sqlite.exec(`
+      INSERT INTO users (id, email) VALUES ('u1', 'u1@example.com'), ('u-op', 'op@example.com');
+      INSERT INTO organizations (id, type, name, slug) VALUES ('org-a', 'AFFILIATE', 'A', 'a'), ('org-b', 'ADVERTISER', 'B', 'b');
+    `);
+    // api_keys: hash is 64 hex, status/revoked_at consistent, terminal + legal transitions, never deleted
+    const hash = "a".repeat(64);
+    await expect(
+      run(`INSERT INTO api_keys (id, organization_id, name, key_prefix, key_hash, secret_hint) VALUES ('k0', 'org-a', 'k', 'tvh_pfx1', 'short', 'abcd')`),
+    ).rejects.toThrow(/CHECK/);
+    await run(`INSERT INTO api_keys (id, organization_id, name, key_prefix, key_hash, secret_hint) VALUES ('k1', 'org-a', 'k', 'tvh_pfx1', '${hash}', 'abcd')`);
+    await expect(run("UPDATE api_keys SET status = 'REVOKED' WHERE id = 'k1'")).rejects.toThrow(/CHECK/);
+    await expect(run(`UPDATE api_keys SET key_hash = '${"b".repeat(64)}' WHERE id = 'k1'`)).rejects.toThrow(/API_KEY_IMMUTABLE/);
+    await run("UPDATE api_keys SET status = 'REVOKED', revoked_at = '2026-01-01T00:00:00.000Z' WHERE id = 'k1'");
+    await expect(run("UPDATE api_keys SET status = 'ACTIVE', revoked_at = NULL WHERE id = 'k1'")).rejects.toThrow(/API_KEY_FINAL/);
+    await expect(run("DELETE FROM api_keys WHERE id = 'k1'")).rejects.toThrow(/API_KEY_IMMUTABLE/);
+
+    // webhooks: https only; one delivery per (subscription, event); cross-tenant delivery rejected; DELIVERED final; replay re-queues RETRY/DEAD_LETTER only
+    await expect(
+      run(`INSERT INTO webhook_subscriptions (id, organization_id, url, secret_ciphertext, key_version, secret_hint) VALUES ('s0', 'org-a', 'http://x', 'v1.a.b', 'k:v1', 'abcd')`),
+    ).rejects.toThrow(/CHECK/);
+    await run(`INSERT INTO webhook_subscriptions (id, organization_id, url, secret_ciphertext, key_version, secret_hint) VALUES ('s1', 'org-a', 'https://x.example/hook', 'v1.a.b', 'k:v1', 'abcd')`);
+    await run(`INSERT INTO webhook_events (id, organization_id, event_type, payload, idempotency_key, occurred_at) VALUES ('e1', 'org-a', 'payout_status_changed', '{"payout_id":"p1"}', 'payout:p1:PAID', '2026-01-01T00:00:00.000Z')`);
+    await run(`INSERT INTO webhook_events (id, organization_id, event_type, payload, idempotency_key, occurred_at) VALUES ('e-b', 'org-b', 'offer_status_changed', '{}', 'offer:o1:PAUSED', '2026-01-01T00:00:00.000Z')`);
+    await expect(
+      run(`INSERT INTO webhook_events (id, organization_id, event_type, payload, idempotency_key, occurred_at) VALUES ('e1-dup', 'org-a', 'payout_status_changed', '{}', 'payout:p1:PAID', '2026-01-01T00:00:00.000Z')`),
+    ).rejects.toThrow(/UNIQUE/);
+    await expect(run("UPDATE webhook_events SET payload = '{}' WHERE id = 'e1'")).rejects.toThrow(/WEBHOOK_EVENTS_APPEND_ONLY/);
+    await run(`INSERT INTO webhook_deliveries (id, organization_id, subscription_id, event_id) VALUES ('d1', 'org-a', 's1', 'e1')`);
+    await expect(run(`INSERT INTO webhook_deliveries (id, organization_id, subscription_id, event_id) VALUES ('d1-dup', 'org-a', 's1', 'e1')`)).rejects.toThrow(/UNIQUE/);
+    await expect(run(`INSERT INTO webhook_deliveries (id, organization_id, subscription_id, event_id) VALUES ('d-x', 'org-a', 's1', 'e-b')`)).rejects.toThrow(
+      /WEBHOOK_DELIVERY_EVENT_ORG_MISMATCH/,
+    );
+    await expect(run("UPDATE webhook_deliveries SET status = 'DELIVERED', delivered_at = '2026-01-01T00:00:00.000Z' WHERE id = 'd1'")).rejects.toThrow(
+      /WEBHOOK_DELIVERY_ILLEGAL_TRANSITION/,
+    );
+    await expect(run("UPDATE webhook_deliveries SET status = 'QUEUED' WHERE id = 'd1'")).resolves.toBeDefined(); // no-op same status
+    await run("UPDATE webhook_deliveries SET status = 'DELIVERING' WHERE id = 'd1'");
+    await run("UPDATE webhook_deliveries SET status = 'RETRY', attempt_count = 1 WHERE id = 'd1'");
+    await run("UPDATE webhook_deliveries SET status = 'DEAD_LETTER', dead_lettered_at = '2026-01-01T00:00:00.000Z' WHERE id = 'd1'");
+    await run("UPDATE webhook_deliveries SET status = 'QUEUED', replay_count = 1 WHERE id = 'd1'"); // operator replay
+    await run("UPDATE webhook_deliveries SET status = 'DELIVERING' WHERE id = 'd1'");
+    await run("UPDATE webhook_deliveries SET status = 'DELIVERED', delivered_at = '2026-01-01T00:00:01.000Z' WHERE id = 'd1'");
+    await expect(run("UPDATE webhook_deliveries SET status = 'QUEUED' WHERE id = 'd1'")).rejects.toThrow(/WEBHOOK_DELIVERY_FINAL/);
+    await expect(run("DELETE FROM webhook_deliveries WHERE id = 'd1'")).rejects.toThrow(/WEBHOOK_DELIVERY_IMMUTABLE/);
+    await run(`INSERT INTO webhook_delivery_attempts (id, delivery_id, attempt_number, signed_at, started_at, outcome) VALUES ('a1', 'd1', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'HTTP_ERROR')`);
+    await expect(run("UPDATE webhook_delivery_attempts SET outcome = 'SUCCESS' WHERE id = 'a1'")).rejects.toThrow(/WEBHOOK_DELIVERY_ATTEMPTS_APPEND_ONLY/);
+
+    // notifications: dedupe_key unique; security-critical IN_APP preferences cannot be disabled
+    await run(`INSERT INTO notifications (id, organization_id, user_id, event_type, channel, title, body, dedupe_key) VALUES ('n1', 'org-a', 'u1', 'security_event', 'IN_APP', 'New login', 'body', 'sec:1:IN_APP:u1')`);
+    await expect(
+      run(`INSERT INTO notifications (id, organization_id, user_id, event_type, channel, title, body, dedupe_key) VALUES ('n2', 'org-a', 'u1', 'security_event', 'IN_APP', 'New login', 'body', 'sec:1:IN_APP:u1')`),
+    ).rejects.toThrow(/UNIQUE/);
+    await expect(run("UPDATE notifications SET title = 'x' WHERE id = 'n1'")).rejects.toThrow(/NOTIFICATION_IMMUTABLE/);
+    await expect(run("DELETE FROM notifications WHERE id = 'n1'")).rejects.toThrow(/NOTIFICATION_IMMUTABLE/);
+    await expect(
+      run(`INSERT INTO notification_preferences (id, user_id, organization_id, event_type, channel, enabled) VALUES ('p0', 'u1', 'org-a', 'security_event', 'IN_APP', 0)`),
+    ).rejects.toThrow(/CHECK/);
+    await run(`INSERT INTO notification_preferences (id, user_id, organization_id, event_type, channel, enabled) VALUES ('p1', 'u1', 'org-a', 'security_event', 'EMAIL', 0)`);
+    await run(`INSERT INTO notification_preferences (id, user_id, organization_id, event_type, channel, enabled) VALUES ('p2', 'u1', 'org-a', 'offer_status_changed', 'IN_APP', 0)`);
+
+    // support tickets: PRD §81 chain; CLOSED terminal; internal notes never by requester; events/messages append-only
+    await run(`INSERT INTO support_tickets (id, organization_id, created_by_user_id, category, subject) VALUES ('t1', 'org-a', 'u1', 'PAYOUT', 'Where is my payout')`);
+    await expect(run("UPDATE support_tickets SET status = 'RESOLVED' WHERE id = 't1'")).rejects.toThrow(/SUPPORT_TICKET_ILLEGAL_TRANSITION/);
+    for (const s of ["IN_PROGRESS", "WAITING_FOR_USER", "IN_PROGRESS", "WAITING_INTERNAL", "RESOLVED"]) {
+      await run(`UPDATE support_tickets SET status = '${s}' WHERE id = 't1'`);
+    }
+    await expect(run("UPDATE support_tickets SET status = 'CLOSED' WHERE id = 't1'")).rejects.toThrow(/CHECK/);
+    await run("UPDATE support_tickets SET status = 'CLOSED', closed_at = '2026-01-01T00:00:00.000Z' WHERE id = 't1'");
+    await expect(run("UPDATE support_tickets SET priority = 'HIGH' WHERE id = 't1'")).rejects.toThrow(/SUPPORT_TICKET_FINAL/);
+    await expect(run("DELETE FROM support_tickets WHERE id = 't1'")).rejects.toThrow(/SUPPORT_TICKET_IMMUTABLE/);
+    await expect(run(`INSERT INTO support_ticket_messages (id, ticket_id, author_user_id, author_type, body, is_internal) VALUES ('m0', 't1', 'u1', 'REQUESTER', 'hi', 1)`)).rejects.toThrow(/CHECK/);
+    await run(`INSERT INTO support_ticket_messages (id, ticket_id, author_user_id, author_type, body, is_internal) VALUES ('m1', 't1', 'u-op', 'AGENT', 'internal note', 1)`);
+    await expect(run("DELETE FROM support_ticket_messages WHERE id = 'm1'")).rejects.toThrow(/SUPPORT_TICKET_MESSAGES_APPEND_ONLY/);
+    await run(`INSERT INTO support_ticket_events (id, ticket_id, event_type, from_status, to_status, actor_user_id) VALUES ('ev1', 't1', 'STATUS_CHANGED', 'RESOLVED', 'CLOSED', 'u-op')`);
+    await expect(run("UPDATE support_ticket_events SET reason = 'x' WHERE id = 'ev1'")).rejects.toThrow(/SUPPORT_TICKET_EVENTS_APPEND_ONLY/);
+
+    // disputes: money needs currency (integer minor); one open per subject; decision complete + once; evidence only while open
+    await expect(
+      run(`INSERT INTO disputes (id, organization_id, raised_by_user_id, category, subject_type, subject_id, title, description, disputed_amount_minor) VALUES ('ds0', 'org-a', 'u1', 'COMMISSION', 'conversion', 'c1', 'Wrong payout', 'desc', 1500)`),
+    ).rejects.toThrow(/CHECK/);
+    await run(`INSERT INTO disputes (id, organization_id, raised_by_user_id, category, subject_type, subject_id, title, description, disputed_amount_minor, currency) VALUES ('ds1', 'org-a', 'u1', 'COMMISSION', 'conversion', 'c1', 'Wrong payout', 'desc', 1500, 'USD')`);
+    await expect(
+      run(`INSERT INTO disputes (id, organization_id, raised_by_user_id, category, subject_type, subject_id, title, description) VALUES ('ds1-dup', 'org-a', 'u1', 'CONVERSION', 'conversion', 'c1', 'again', 'desc')`),
+    ).rejects.toThrow(/UNIQUE/);
+    await run(`INSERT INTO dispute_evidence (id, dispute_id, submitted_by_user_id, submitter_side, kind, content) VALUES ('dev1', 'ds1', 'u1', 'TENANT', 'TEXT', 'see click log')`);
+    await expect(run("UPDATE disputes SET disputed_amount_minor = 1 WHERE id = 'ds1'")).rejects.toThrow(/DISPUTE_IMMUTABLE/);
+    await expect(run("UPDATE disputes SET status = 'DECIDED', decided_at = '2026-01-01T00:00:00.000Z' WHERE id = 'ds1'")).rejects.toThrow(/DISPUTE_ILLEGAL_TRANSITION/);
+    await run("UPDATE disputes SET status = 'UNDER_REVIEW' WHERE id = 'ds1'");
+    await expect(
+      run(`INSERT INTO dispute_decisions (id, dispute_id, decision, reason, evidence, actor_user_id, decided_at) VALUES ('dd0', 'ds1', 'UPHELD', '', '[]', 'u-op', '2026-01-01T00:00:00.000Z')`),
+    ).rejects.toThrow(/CHECK/);
+    await run(`INSERT INTO dispute_decisions (id, dispute_id, decision, reason, evidence, actor_user_id, decided_at) VALUES ('dd1', 'ds1', 'UPHELD', 'click log confirms', '["dev1"]', 'u-op', '2026-01-01T00:00:00.000Z')`);
+    await expect(
+      run(`INSERT INTO dispute_decisions (id, dispute_id, decision, reason, evidence, actor_user_id, decided_at) VALUES ('dd2', 'ds1', 'REJECTED', 'again', '[]', 'u-op', '2026-01-01T00:00:00.000Z')`),
+    ).rejects.toThrow(/UNIQUE/);
+    await expect(run("UPDATE dispute_decisions SET decision = 'REJECTED' WHERE id = 'dd1'")).rejects.toThrow(/DISPUTE_DECISIONS_APPEND_ONLY/);
+    await run("UPDATE disputes SET status = 'DECIDED', decided_at = '2026-01-01T00:00:00.000Z' WHERE id = 'ds1'");
+    await expect(run(`INSERT INTO dispute_evidence (id, dispute_id, submitted_by_user_id, submitter_side, kind, content) VALUES ('dev2', 'ds1', 'u1', 'TENANT', 'TEXT', 'late')`)).rejects.toThrow(/DISPUTE_NOT_OPEN/);
+    await expect(run("UPDATE disputes SET assigned_to_user_id = 'u-op' WHERE id = 'ds1'")).rejects.toThrow(/DISPUTE_FINAL/);
+    await expect(run("DELETE FROM dispute_evidence WHERE id = 'dev1'")).rejects.toThrow(/DISPUTE_EVIDENCE_APPEND_ONLY/);
+
+    // appeals: one open per subject; decision once with actor+reason; terminal
+    await run(`INSERT INTO appeals (id, organization_id, submitted_by_user_id, appeal_type, subject_type, subject_id, grounds) VALUES ('ap1', 'org-a', 'u1', 'PAYOUT_HOLD', 'payout', 'p1', 'hold is wrong')`);
+    await expect(
+      run(`INSERT INTO appeals (id, organization_id, submitted_by_user_id, appeal_type, subject_type, subject_id, grounds) VALUES ('ap1-dup', 'org-a', 'u1', 'PAYOUT_HOLD', 'payout', 'p1', 'again')`),
+    ).rejects.toThrow(/UNIQUE/);
+    await expect(run("UPDATE appeals SET grounds = 'x' WHERE id = 'ap1'")).rejects.toThrow(/APPEAL_IMMUTABLE/);
+    await run("UPDATE appeals SET status = 'UNDER_REVIEW' WHERE id = 'ap1'");
+    await run(`INSERT INTO appeal_decisions (id, appeal_id, outcome, reason, actor_user_id, decided_at) VALUES ('ad1', 'ap1', 'ACCEPTED', 'hold released', 'u-op', '2026-01-01T00:00:00.000Z')`);
+    await expect(run(`INSERT INTO appeal_decisions (id, appeal_id, outcome, reason, actor_user_id, decided_at) VALUES ('ad2', 'ap1', 'REJECTED', 'x', 'u-op', '2026-01-01T00:00:00.000Z')`)).rejects.toThrow(/UNIQUE/);
+    await expect(run("DELETE FROM appeal_decisions WHERE id = 'ad1'")).rejects.toThrow(/APPEAL_DECISIONS_APPEND_ONLY/);
+    await run("UPDATE appeals SET status = 'DECIDED', decided_at = '2026-01-01T00:00:00.000Z' WHERE id = 'ap1'");
+    await expect(run("UPDATE appeals SET status = 'UNDER_REVIEW', decided_at = NULL WHERE id = 'ap1'")).rejects.toThrow(/APPEAL_FINAL/);
+    await expect(run("DELETE FROM appeals WHERE id = 'ap1'")).rejects.toThrow(/APPEAL_IMMUTABLE/);
   });
 });
