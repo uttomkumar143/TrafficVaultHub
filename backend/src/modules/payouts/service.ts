@@ -476,6 +476,12 @@ export class PayoutService {
       throw new AppError(409, "INVALID_PAYOUT_TRANSITION", `cannot process a payout in status ${from}`);
     }
     if (from !== "PROCESSING") this.assertEdge(row, "PROCESSING");
+    // FAILED is recoverable only after an approval: a payout that failed its
+    // eligibility check was never approved and must be re-requested (0011
+    // CHECK: PROCESSING requires approved_at). Refuse here with 409, not 500.
+    if (from === "FAILED" && row.approved_at === null) {
+      throw new AppError(409, "INVALID_PAYOUT_TRANSITION", "cannot process a payout that failed eligibility (never approved); cancel and re-request");
+    }
     const method = await this.repo.findPayoutMethod(tenantId, row.payout_method_id);
     if (!method) throw new AppError(409, "PAYOUT_METHOD_NOT_FOUND", "payout method no longer exists");
     if (method.currency !== row.currency) throw new AppError(409, "CURRENCY_MISMATCH_METHOD", "payout method currency changed");
