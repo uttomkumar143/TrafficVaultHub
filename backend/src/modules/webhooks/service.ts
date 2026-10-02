@@ -84,6 +84,13 @@ export const WEBHOOK_HEADERS = {
 
 /** Canonical path the receiver must use when recomputing the signature (host-independent). */
 export const WEBHOOK_SIGNATURE_PATH = "/webhook";
+/**
+ * Receiver-side freshness window (seconds, either direction) for `x-tvh-timestamp`.
+ * Matches the tracking-postback tolerance so one rule covers every signed call.
+ * Retries re-sign with a fresh timestamp, so a legitimately delayed delivery is
+ * never rejected by this window.
+ */
+export const WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 300;
 export const URL_MAX_LENGTH = 2048;
 export const DESCRIPTION_MAX_LENGTH = 500;
 export const DEFAULT_MAX_ATTEMPTS = 5;
@@ -580,13 +587,41 @@ export class WebhookService {
 
   // ---- receiver-side helper (for SDK / tests): verify a signed request -------------
 
-  /** Recompute and constant-time compare the signature a receiver sees. */
-  static async verifySignature(secret: string, headers: Record<string, string>, body: string): Promise<boolean> {
+  /**
+   * Recompute and constant-time compare the signature a receiver sees.
+   *
+   * Receivers MUST also enforce freshness and idempotency — a valid signature
+   * alone does not prevent an attacker from re-sending a captured request:
+   *
+   *  - `toleranceSeconds` (default {@link WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS}):
+   *    requests whose `x-tvh-timestamp` is further than this from `now` are
+   *    rejected, in either direction (stale replay or clock skew). Pass
+   *    `Infinity` only in tests that replay archived fixtures.
+   *  - `seenEventIds`: optional idempotency store. When supplied, an event id
+   *    that has already been accepted is rejected and a freshly accepted id
+   *    is recorded. Only *accepted* ids are recorded — a forged request must
+   *    not be able to poison the store and block the genuine delivery.
+   */
+  static async verifySignature(
+    secret: string,
+    headers: Record<string, string>,
+    body: string,
+    options: { now?: number; toleranceSeconds?: number; seenEventIds?: { has(id: string): boolean; add(id: string): unknown } } = {},
+  ): Promise<boolean> {
     const ts = Number(headers[WEBHOOK_HEADERS.timestamp]);
     const eventId = headers[WEBHOOK_HEADERS.eventId];
     const sig = headers[WEBHOOK_HEADERS.signature];
     if (!Number.isInteger(ts) || !eventId || !sig) return false;
-    return verifyPostbackSignature(secret, { method: "POST", path: WEBHOOK_SIGNATURE_PATH, timestamp: ts, nonce: eventId, body }, sig);
+
+    const tolerance = options.toleranceSeconds ?? WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS;
+    const now = options.now ?? Math.floor(Date.now() / 1000);
+    if (Math.abs(now - ts) > tolerance) return false;
+
+    if (options.seenEventIds?.has(eventId)) return false;
+
+    const ok = await verifyPostbackSignature(secret, { method: "POST", path: WEBHOOK_SIGNATURE_PATH, timestamp: ts, nonce: eventId, body }, sig);
+    if (ok) options.seenEventIds?.add(eventId);
+    return ok;
   }
 
   // ---- internals ---------------------------------------------------------------------

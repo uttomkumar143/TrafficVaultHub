@@ -24,7 +24,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { toBase64Url } from "../modules/auth/crypto-utils";
 import { ScriptedWebhookTransport } from "../modules/webhooks/transport";
-import { WEBHOOK_HEADERS, WebhookService } from "../modules/webhooks/service";
+import { WEBHOOK_HEADERS, WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS, WebhookService } from "../modules/webhooks/service";
 import { PASSWORD, RANDOM_ID, TestHarness, json } from "./fixtures";
 
 const MASTER = toBase64Url(new Uint8Array(32).map((_, i) => i * 11 + 3));
@@ -484,6 +484,25 @@ describe("webhooks HTTP — delivery lifecycle through the scripted transport (�
     expect(await WebhookService.verifySignature(secret, req.headers, req.body)).toBe(true);
     expect(await WebhookService.verifySignature(secret, req.headers, req.body + " ")).toBe(false);
     expect(await WebhookService.verifySignature("wrong-secret", req.headers, req.body)).toBe(false);
+
+    // Freshness window (PRD §80): the signature is valid forever, the request is not.
+    const ts = Number(req.headers[WEBHOOK_HEADERS.timestamp]);
+    expect(await WebhookService.verifySignature(secret, req.headers, req.body, { now: ts + WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS })).toBe(true);
+    expect(await WebhookService.verifySignature(secret, req.headers, req.body, { now: ts + WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS + 1 })).toBe(false);
+    expect(await WebhookService.verifySignature(secret, req.headers, req.body, { now: ts - WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS - 1 })).toBe(false);
+    expect(await WebhookService.verifySignature(secret, req.headers, req.body, { now: ts + 3600, toleranceSeconds: 7200 })).toBe(true);
+    // A tampered timestamp inside the window still fails because it is part of the signed string.
+    const skewed = { ...req.headers, [WEBHOOK_HEADERS.timestamp]: String(ts + 1) };
+    expect(await WebhookService.verifySignature(secret, skewed, req.body)).toBe(false);
+
+    // Replay protection: with an idempotency store the same event id is accepted exactly once,
+    // and a forged request must not be able to pre-poison the store.
+    const seen = new Set<string>();
+    expect(await WebhookService.verifySignature("wrong-secret", req.headers, req.body, { seenEventIds: seen })).toBe(false);
+    expect(seen.size).toBe(0);
+    expect(await WebhookService.verifySignature(secret, req.headers, req.body, { seenEventIds: seen })).toBe(true);
+    expect(seen.has(d.event_id)).toBe(true);
+    expect(await WebhookService.verifySignature(secret, req.headers, req.body, { seenEventIds: seen })).toBe(false);
     const body = JSON.parse(req.body) as { id: string; type: string; data: Record<string, unknown>; reference: { type: string; id: string } };
     expect(body.id).toBe(d.event_id);
     expect(body.type).toBe("conversion_updated");
