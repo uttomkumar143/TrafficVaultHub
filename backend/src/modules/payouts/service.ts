@@ -204,6 +204,17 @@ export class PayoutService {
 
   // ---- request -----------------------------------------------------------------------------
 
+  /**
+   * Read-only §66 replay probe for the HTTP layer (201 vs 200): the payout a
+   * previous `request()` with this idempotency key created in THIS tenant, or
+   * null. Same permission as `request()`; writes nothing.
+   */
+  async peekIdempotencyKey(tenant: TenantContext, idempotencyKey: string): Promise<PayoutRow | null> {
+    this.require(tenant, "payouts.request");
+    if (typeof idempotencyKey !== "string" || idempotencyKey.length < 1 || idempotencyKey.length > 256) return null;
+    return this.repo.findByIdempotencyKey(tenantIdOf(tenant), idempotencyKey);
+  }
+
   async request(ctx: AuthenticatedContext, tenant: TenantContext, input: RequestPayoutInput, meta: RequestMeta): Promise<PayoutRow> {
     this.require(tenant, "payouts.request");
     assertMoney(input.amount_minor, input.currency);

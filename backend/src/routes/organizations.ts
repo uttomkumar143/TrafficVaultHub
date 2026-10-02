@@ -30,6 +30,7 @@
  *   /:orgId/conversions/lifecycle, /:orgId/conversions/:id/{lifecycle,approve,reject,dispute,fraud-review,reverse}
  *                                       → routes/conversions.ts  conversionLifecycleRoutes (Phase 4 Unit 10a, advertiser)
  *   /:orgId/conversion-holds(/*)        → routes/conversions.ts  conversionHoldRoutes    (Phase 4 Unit 10a, advertiser)
+ *   /:orgId/payouts(/*)                 → routes/payouts.ts      payoutRoutes            (Phase 5 Unit 13a, affiliate)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -47,6 +48,7 @@ import { attributionPolicyRoutes, attributionRoutes, conversionRoutes, postbackS
 import { conversionHoldRoutes, conversionLifecycleRoutes } from "./conversions";
 import { complianceRoutes } from "./compliance";
 import { fraudRoutes } from "./fraud";
+import { payoutRoutes } from "./payouts";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 
 const nameSchema = z.string().trim().min(2).max(120);
@@ -127,6 +129,9 @@ organizationRoutes.route("/:orgId/fraud", fraudRoutes);
 // Phase 4 Unit 10c — compliance rules / evaluations / cases over ComplianceService
 // (fail-safe: INSUFFICIENT_INFORMATION is never PASS; RESOLVED only via /resolve).
 organizationRoutes.route("/:orgId/compliance", complianceRoutes);
+
+// Phase 5 Unit 13a — affiliate-facing payouts (request / read / cancel; tenant = owning affiliate org).
+organizationRoutes.route("/:orgId/payouts", payoutRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);
