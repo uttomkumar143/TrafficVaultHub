@@ -1,4 +1,16 @@
 import { Hono, type MiddlewareHandler } from "hono";
+import {
+  LogNotificationAdapter,
+  NullCRMAdapter,
+  NullFraudAdapter,
+  NullTrackingAdapter,
+  StubPaymentAdapter as StubChargeAdapter,
+  type CRMAdapter,
+  type FraudAdapter,
+  type NotificationAdapter,
+  type PaymentAdapter,
+  type TrackingAdapter,
+} from "./integrations";
 import type { AppEnv } from "./lib/bindings";
 import { AppError, errorResponse } from "./lib/errors";
 import { AdvertiserRepository } from "./modules/advertisers/repository";
@@ -40,6 +52,16 @@ export interface CreateAppOptions {
    * `FetchWebhookTransport`; tests inject `ScriptedWebhookTransport` (no network).
    */
   webhookTransport?: WebhookTransport;
+  /**
+   * Phase 6 Unit 5 — PRD §367 integration adapters. Each defaults to the
+   * shipped stub/null implementation; a real vendor is injected here and
+   * nowhere else. (`PayoutAdapter` is `paymentProvider` above — same port.)
+   */
+  trackingAdapter?: TrackingAdapter;
+  paymentAdapter?: PaymentAdapter;
+  notificationAdapter?: NotificationAdapter;
+  crmAdapter?: CRMAdapter;
+  fraudAdapter?: FraudAdapter;
 }
 
 /**
@@ -52,6 +74,11 @@ export function createApp(options: CreateAppOptions = {}) {
   const emailSender = options.emailSender ?? new LogEmailSender();
   const paymentProvider: PaymentProvider = options.paymentProvider ?? new StubPaymentAdapter();
   const webhookTransport: WebhookTransport = options.webhookTransport ?? new FetchWebhookTransport();
+  const trackingAdapter: TrackingAdapter = options.trackingAdapter ?? new NullTrackingAdapter();
+  const paymentAdapter: PaymentAdapter = options.paymentAdapter ?? new StubChargeAdapter();
+  const notificationAdapter: NotificationAdapter = options.notificationAdapter ?? new LogNotificationAdapter();
+  const crmAdapter: CRMAdapter = options.crmAdapter ?? new NullCRMAdapter();
+  const fraudAdapter: FraudAdapter = options.fraudAdapter ?? new NullFraudAdapter();
 
   // PRD §72 — uniform error envelope, no stack traces exposed.
   app.notFound((c) =>
@@ -83,6 +110,11 @@ export function createApp(options: CreateAppOptions = {}) {
     const ttl = Number(c.env.SESSION_TTL_SECONDS);
     c.set("paymentProvider", paymentProvider);
     c.set("webhookTransport", webhookTransport);
+    c.set("trackingAdapter", trackingAdapter);
+    c.set("paymentAdapter", paymentAdapter);
+    c.set("notificationAdapter", notificationAdapter);
+    c.set("crmAdapter", crmAdapter);
+    c.set("fraudAdapter", fraudAdapter);
     c.set(
       "authService",
       new AuthService(new AuthRepository(c.env.DB), emailSender, {

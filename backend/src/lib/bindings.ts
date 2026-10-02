@@ -2,6 +2,7 @@
  * Worker environment bindings.
  * Mirrors `wrangler.jsonc`. Keep in sync when bindings change.
  */
+import type { CRMAdapter, FraudAdapter, NotificationAdapter, PaymentAdapter, TrackingAdapter } from "../integrations";
 import type { TenantContext } from "../middleware/require-org";
 import type { AdvertiserService } from "../modules/advertisers/service";
 import type { AffiliateService } from "../modules/affiliates/service";
@@ -71,6 +72,17 @@ export interface Variables {
    * Set by `createApp` (default FetchWebhookTransport; tests inject ScriptedWebhookTransport).
    */
   webhookTransport: WebhookTransport;
+  /**
+   * Phase 6 Unit 5 — PRD §367 integration adapters, set by `createApp`
+   * (defaults: NullTrackingAdapter, StubPaymentAdapter (charges),
+   * LogNotificationAdapter, NullCRMAdapter, NullFraudAdapter). The
+   * PayoutAdapter is `paymentProvider` above — the same port under its PRD name.
+   */
+  trackingAdapter: TrackingAdapter;
+  paymentAdapter: PaymentAdapter;
+  notificationAdapter: NotificationAdapter;
+  crmAdapter: CRMAdapter;
+  fraudAdapter: FraudAdapter;
   /** Present only after `requireAuth` has run. */
   auth: AuthenticatedContext;
   /** Present only after `requireOrg` has run (RBAC + tenant scope, Unit 4). */
