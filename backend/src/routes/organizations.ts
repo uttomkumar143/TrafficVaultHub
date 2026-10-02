@@ -36,6 +36,7 @@
  *   /:orgId/billing/{profile,alerts}    → routes/billing.ts      billingRoutes           (Phase 5 Unit 14, advertiser)
  *   /:orgId/platform/billing/advertisers/:advertiserOrgId/{profile,evaluate}
  *                                       → routes/billing.ts      platformBillingRoutes   (Phase 5 Unit 14, PLATFORM org)
+ *   /:orgId/api-keys(/*)                → routes/api-keys.ts     apiKeyRoutes            (Phase 6 Unit 3, any tenant)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -47,6 +48,7 @@ import { requireAuth } from "../middleware/require-auth";
 import { requireOrg, requirePermission } from "../middleware/require-org";
 import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
 import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
+import { apiKeyRoutes } from "./api-keys";
 import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
 import { billingRoutes, platformBillingRoutes } from "./billing";
 import { marketplaceRoutes, offerReviewRoutes, offerRoutes } from "./offers";
@@ -157,6 +159,9 @@ organizationRoutes.route("/:orgId/ledger", ledgerRoutes);
 
 // Phase 5 Unit 14 — advertiser billing face (own profile + funding alerts, read-only).
 organizationRoutes.route("/:orgId/billing", billingRoutes);
+
+// Phase 6 Unit 3 — API keys (secret shown once; hash never selected by a read path).
+organizationRoutes.route("/:orgId/api-keys", apiKeyRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);
