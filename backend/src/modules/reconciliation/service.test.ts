@@ -355,3 +355,206 @@ describe("ReconciliationService", () => {
     expect((await svc.listCases(reader, { limit: 10, cursor: null }, { status: "OPEN" })).items).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 5 Unit 15 — ledger side (§114 #6)
+// ---------------------------------------------------------------------------
+
+/** Raw ledger fixtures over migrations 0010/0011 (no LedgerService: we test detection of tampered rows). */
+function ledgerAccounts(db: TestD1, org: string): void {
+  db.sqlite.exec(`
+    INSERT INTO ledger_accounts (id, organization_id, code, account_type, currency, name)
+      VALUES ('la-rec-${org}', '${org}', 'ADVERTISER_RECEIVABLE', 'ASSET', 'USD', 'Receivable');
+    INSERT INTO ledger_accounts (id, organization_id, code, account_type, currency, name)
+      VALUES ('la-pay-${org}', '${org}', 'AFFILIATE_PAYABLE', 'LIABILITY', 'USD', 'Payable');
+  `);
+}
+function journal(db: TestD1, id: string, org: string, refType: "CONVERSION" | "PAYOUT", refId: string, total: number, currency = "USD", postedAt = "2026-03-10T10:00:02.000Z"): void {
+  db.sqlite
+    .prepare(
+      `INSERT INTO journal_entries (id, organization_id, journal_type, currency, total_minor, reference_type, reference_id, idempotency_key, actor_type, posted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYSTEM', ?)`,
+    )
+    .run(id, org, refType === "CONVERSION" ? "CONVERSION_COMMISSION" : "PAYOUT", currency, total, refType, refId, `idem-${id}`, postedAt);
+}
+/** `gross` is the advertiser payout = expected journal total; affiliate share 80%, platform margin the remainder. */
+function commission(db: TestD1, id: string, conversionId: string, journalId: string, gross = 5000, currency = "USD", org = ADV): void {
+  const affiliate = Math.floor(gross * 0.8);
+  db.sqlite
+    .prepare(
+      `INSERT INTO commissions (id, organization_id, conversion_id, affiliate_organization_id, offer_id, offer_version_id, payout_type, currency,
+         affiliate_commission_minor, advertiser_payout_minor, platform_margin_minor, journal_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'CPA', ?, ?, ?, ?, ?)`,
+    )
+    .run(id, org, conversionId, AFF, OFFER, VERSION, currency, affiliate, gross, gross - affiliate, journalId);
+}
+/** Posted conversion with a consistent commission + CONVERSION journal. */
+function posted(db: TestD1, id: string, ext: string, lifecycle: string, amount = 5000): void {
+  conversion(db, id, ext, lifecycle);
+  journal(db, `j-${id}`, ADV, "CONVERSION", id, amount);
+  commission(db, `cm-${id}`, id, `j-${id}`, amount);
+}
+function payoutMethod(db: TestD1, org: string): string {
+  const id = `pm-${org}`;
+  db.sqlite
+    .prepare(
+      `INSERT INTO payout_methods (id, organization_id, affiliate_profile_id, method_type, provider, provider_token, display_label, currency, status, verified_at)
+       VALUES (?, ?, ?, 'PAYPAL', 'stub', ?, 'PayPal', 'USD', 'VERIFIED', '2026-01-01T00:00:00.000Z')`,
+    )
+    .run(id, org, org === AFF ? "fp1" : "fp2", `tok-${org}`);
+  return id;
+}
+function paidPayout(db: TestD1, id: string, org: string, amount: number, journalId: string | null, paidAt = "2026-03-15T00:00:00.000Z"): void {
+  db.sqlite
+    .prepare(
+      `INSERT INTO payouts (id, organization_id, payout_method_id, amount_minor, currency, status, idempotency_key, requested_actor_type,
+         requested_by_user_id, approved_by_user_id, approved_at, paid_at, journal_id)
+       VALUES (?, ?, ?, ?, 'USD', 'PAID', ?, 'TENANT', ?, ?, ?, ?, ?)`,
+    )
+    .run(id, org, `pm-${org}`, amount, `idem-${id}`, USER, "user-approver", paidAt, paidAt, journalId);
+}
+const affManager = tenantFor(AFF, "ADVERTISER", ["reconciliation.read", "reconciliation.manage"]);
+
+describe("ReconciliationService — ledger side (§114 #6)", () => {
+  let db: TestD1;
+  let svc: ReconciliationService;
+
+  beforeEach(() => {
+    db = createTestD1();
+    seed(db);
+    ledgerAccounts(db, ADV);
+    ledgerAccounts(db, AFF);
+    db.sqlite.exec("INSERT INTO users (id, email) VALUES ('user-approver', 'fin@example.com')");
+    svc = new ReconciliationService(new ReconciliationRepository(db), db, { now: () => NOW });
+  });
+  afterEach(() => db.close());
+
+  it("(a) clean ledger → MATCHED: posted conversions carry a matching CONVERSION journal, pre-posting ones carry none, PAID payout has its PAYOUT journal", async () => {
+    posted(db, "c-1", "ext-1", "LEDGER_POSTED");
+    posted(db, "c-2", "ext-2", "EARNED");
+    posted(db, "c-3", "ext-3", "PAYOUT_ELIGIBLE", 125);
+    posted(db, "c-4", "ext-4", "PAID");
+    conversion(db, "c-5", "ext-5", "APPROVED"); // pre-posting
+    conversion(db, "c-6", "ext-6", "REJECTED");
+    conversion(db, "c-7", "ext-7", "REVERSED"); // reversed from APPROVED: never posted, no commission → not a mismatch
+    const reported = [1, 2, 3, 4, 5].map((n) => ({ external_conversion_id: `ext-${n}`, status: "APPROVED" as const, amount_minor: 10000, currency: "USD" }));
+    reported.push({ external_conversion_id: "ext-6", status: "REJECTED" as never, amount_minor: 10000, currency: "USD" }, { external_conversion_id: "ext-7", status: "REJECTED" as never, amount_minor: 10000, currency: "USD" });
+    const { run, cases } = await svc.run(ctx, manager, { ...PERIOD, reported }, META);
+    expect(run).toMatchObject({ status: "COMPLETED", mismatch_count: 0, ledger_status: "MATCHED", tvh_count: 7 });
+    expect(cases).toEqual([]);
+    expect(db.sqlite.prepare("SELECT ledger_status FROM reconciliation_runs WHERE id = ?").get(run.id)).toEqual({ ledger_status: "MATCHED" });
+    const meta = JSON.parse((db.sqlite.prepare("SELECT metadata FROM audit_logs WHERE action = 'reconciliation.run.completed'").get() as { metadata: string }).metadata);
+    expect(meta).toMatchObject({ ledger_status: "MATCHED", ledger_mismatch_count: 0 });
+
+    // affiliate tenant: PAID payout with its PAYOUT journal → MATCHED
+    payoutMethod(db, AFF);
+    journal(db, "j-p1", AFF, "PAYOUT", "p-1", 7000, "USD", "2026-03-15T00:00:00.000Z");
+    paidPayout(db, "p-1", AFF, 7000, "j-p1");
+    const aff = await svc.runScheduled(AFF as TenantId, { ...PERIOD, reported: [], request_id: "cron-aff" });
+    expect(aff.run).toMatchObject({ organization_id: AFF, mismatch_count: 0, ledger_status: "MATCHED" });
+  });
+
+  it("(b) tampered/missing journals → MISMATCHED with one LEDGER_MISMATCH case per discrepancy, tenant-scoped, audited and resolvable", async () => {
+    // JOURNAL_MISSING: commission points at a journal that references another conversion
+    conversion(db, "c-1", "ext-1", "EARNED");
+    conversion(db, "c-9", "ext-9", "APPROVED", { occurred_at: "2026-01-05T00:00:00.000Z" }); // out of period, anchors the stray journal
+    journal(db, "j-stray", ADV, "CONVERSION", "c-9", 5000);
+    commission(db, "cm-1", "c-1", "j-stray");
+    // JOURNAL_AMOUNT_MISMATCH
+    conversion(db, "c-2", "ext-2", "PAID");
+    journal(db, "j-2", ADV, "CONVERSION", "c-2", 4999);
+    commission(db, "cm-2", "c-2", "j-2", 5000);
+    // JOURNAL_CURRENCY_MISMATCH
+    conversion(db, "c-3", "ext-3", "LEDGER_POSTED");
+    journal(db, "j-3", ADV, "CONVERSION", "c-3", 5000, "EUR");
+    commission(db, "cm-3", "c-3", "j-3", 5000, "USD");
+    // COMMISSION_MISSING ×2
+    conversion(db, "c-4", "ext-4", "EARNED");
+    conversion(db, "c-5", "ext-5", "PAYOUT_ELIGIBLE");
+    // COMMISSION_WITHOUT_POSTING
+    conversion(db, "c-6", "ext-6", "PENDING");
+    journal(db, "j-6", ADV, "CONVERSION", "c-6", 5000);
+    commission(db, "cm-6", "c-6", "j-6");
+    // JOURNAL_WITHOUT_COMMISSION: orphan CONVERSION journal for an in-period conversion
+    conversion(db, "c-7", "ext-7", "APPROVED");
+    journal(db, "j-orphan", ADV, "CONVERSION", "c-7", 5000);
+    // clean posted row
+    posted(db, "c-8", "ext-8", "PAID");
+    // other tenant's dirty rows must never leak
+    ledgerAccounts(db, ADV2);
+    conversion(db, "x-1", "ext-x1", "PAID", { org: ADV2, offer: "offer-x" });
+    journal(db, "j-x", ADV2, "CONVERSION", "x-1", 1);
+
+    const { run, cases } = await svc.run(ctx, manager, { ...PERIOD, reported: [] }, META);
+    const ledger = cases.filter((c) => c.mismatch_type === "LEDGER_MISMATCH");
+    expect(run.ledger_status).toBe("MISMATCHED");
+    expect(run.mismatch_count).toBe(cases.length);
+    expect(ledger.map((c) => `${c.tvh_status}:${c.external_conversion_id}`).sort()).toEqual(
+      ["JOURNAL_MISSING:ext-1", "JOURNAL_AMOUNT_MISMATCH:ext-2", "JOURNAL_CURRENCY_MISMATCH:ext-3", "COMMISSION_MISSING:ext-4", "COMMISSION_MISSING:ext-5", "COMMISSION_WITHOUT_POSTING:ext-6", "JOURNAL_WITHOUT_COMMISSION:ext-7"].sort(),
+    );
+    expect(ledger.find((c) => c.external_conversion_id === "ext-2")).toMatchObject({ conversion_id: "c-2", reported_amount_minor: 4999, tvh_amount_minor: 5000, reported_status: null });
+    expect(ledger.find((c) => c.external_conversion_id === "ext-1")).toMatchObject({ conversion_id: "c-1", reported_amount_minor: null, tvh_amount_minor: 5000 });
+    expect(ledger.find((c) => c.external_conversion_id === "ext-7")).toMatchObject({ conversion_id: "c-7", reported_amount_minor: 5000, tvh_amount_minor: null });
+    expect(ledger.some((c) => c.external_conversion_id === "ext-x1" || c.external_conversion_id === "ext-8")).toBe(false); // clean + foreign rows never produce ledger cases
+    expect(cases.filter((c) => c.mismatch_type === "MISSING_AT_ADVERTISER")).toHaveLength(8); // reported [] → every in-period TVH conversion of ADV
+    expect(cases.every((c) => c.organization_id === ADV && c.status === "OPEN")).toBe(true);
+    expect(count(db, "SELECT COUNT(*) AS n FROM reconciliation_cases WHERE mismatch_type = 'LEDGER_MISMATCH'")).toBe(7);
+
+    const meta = JSON.parse((db.sqlite.prepare("SELECT metadata FROM audit_logs WHERE action = 'reconciliation.run.completed'").get() as { metadata: string }).metadata);
+    expect(meta).toMatchObject({
+      ledger_status: "MISMATCHED",
+      ledger_mismatch_count: 7,
+      ledger_mismatches_by_detail: { JOURNAL_MISSING: 1, JOURNAL_AMOUNT_MISMATCH: 1, JOURNAL_CURRENCY_MISMATCH: 1, COMMISSION_MISSING: 2, COMMISSION_WITHOUT_POSTING: 1, JOURNAL_WITHOUT_COMMISSION: 1 },
+    });
+    expect(meta.mismatches_by_type.LEDGER_MISMATCH).toBe(7);
+
+    // other tenant sees nothing of it; its own run is clean apart from its own dirty rows
+    expect((await svc.listCases(manager2, { limit: 50, cursor: null })).items).toHaveLength(0);
+
+    // a LEDGER_MISMATCH case is resolvable like any other
+    const target = ledger.find((c) => c.external_conversion_id === "ext-2")!;
+    const resolved = await svc.resolveCase(ctx, manager, target.id, { status: "RESOLVED", reason_code: "LEDGER_CORRECTED" }, META);
+    expect(resolved).toMatchObject({ id: target.id, status: "RESOLVED" });
+    expect(db.sqlite.prepare("SELECT status FROM reconciliation_cases WHERE id = ?").get(target.id)).toEqual({ status: "RESOLVED" });
+    expect(audits(db, "reconciliation.case.resolved")).toBe(1);
+  });
+
+  it("(c) PAID payouts without / with a mismatching PAYOUT journal → PAYOUT_JOURNAL_MISSING / PAYOUT_JOURNAL_MISMATCH keyed payout:<id>; out-of-period and other tenants ignored", async () => {
+    payoutMethod(db, AFF);
+    paidPayout(db, "p-miss", AFF, 5000, null);
+    journal(db, "j-pbad", AFF, "PAYOUT", "p-bad", 4999, "USD", "2026-03-16T00:00:00.000Z");
+    paidPayout(db, "p-bad", AFF, 5000, "j-pbad");
+    journal(db, "j-pok", AFF, "PAYOUT", "p-ok", 6000, "USD", "2026-03-17T00:00:00.000Z");
+    paidPayout(db, "p-ok", AFF, 6000, "j-pok");
+    paidPayout(db, "p-old", AFF, 5000, null, "2026-02-01T00:00:00.000Z"); // outside period
+    // other affiliate tenant with a dirty PAID payout
+    db.sqlite.exec(`
+      INSERT INTO organizations (id, type, name, slug) VALUES ('org-aff-2', 'AFFILIATE', 'Aff2', 'aff2');
+      INSERT INTO affiliate_profiles (id, organization_id, status, display_name) VALUES ('fp2', 'org-aff-2', 'ACTIVE', 'Aff2');
+    `);
+    payoutMethod(db, "org-aff-2");
+    paidPayout(db, "p-other", "org-aff-2", 5000, null);
+
+    const { run, cases } = await svc.run(ctx, affManager, { ...PERIOD, reported: [] }, META);
+    expect(run).toMatchObject({ organization_id: AFF, mismatch_count: 2, ledger_status: "MISMATCHED" });
+    expect(cases.map((c) => `${c.tvh_status}:${c.external_conversion_id}`).sort()).toEqual(["PAYOUT_JOURNAL_MISMATCH:payout:p-bad", "PAYOUT_JOURNAL_MISSING:payout:p-miss"]);
+    expect(cases.every((c) => c.mismatch_type === "LEDGER_MISMATCH" && c.conversion_id === null && c.organization_id === AFF)).toBe(true);
+    expect(cases.find((c) => c.external_conversion_id === "payout:p-bad")).toMatchObject({ reported_amount_minor: 4999, tvh_amount_minor: 5000 });
+    expect(cases.find((c) => c.external_conversion_id === "payout:p-miss")).toMatchObject({ reported_amount_minor: null, tvh_amount_minor: 5000 });
+    expect(db.sqlite.prepare("SELECT conversion_id, external_conversion_id FROM reconciliation_cases WHERE run_id = ? ORDER BY external_conversion_id").all(run.id)).toEqual([
+      { conversion_id: null, external_conversion_id: "payout:p-bad" },
+      { conversion_id: null, external_conversion_id: "payout:p-miss" },
+    ]);
+    const meta = JSON.parse((db.sqlite.prepare("SELECT metadata FROM audit_logs WHERE action = 'reconciliation.run.completed'").get() as { metadata: string }).metadata);
+    expect(meta.ledger_mismatches_by_detail).toEqual({ PAYOUT_JOURNAL_MISSING: 1, PAYOUT_JOURNAL_MISMATCH: 1 });
+  });
+
+  it("(d) the atomic batch is preserved: a case insert that violates the 0009 external id length CHECK leaves 0 runs, 0 cases, 0 audit rows", async () => {
+    conversion(db, "c-1", "ext-1", "PAID"); // ledger case COMMISSION_MISSING would be written in the same batch
+    const tooLong = "x".repeat(129);
+    await expect(svc.run(ctx, manager, { ...PERIOD, reported: [{ external_conversion_id: tooLong, status: "APPROVED", amount_minor: 1, currency: "USD" }] }, META)).rejects.toBeDefined();
+    expect(count(db, "SELECT COUNT(*) AS n FROM reconciliation_runs")).toBe(0);
+    expect(count(db, "SELECT COUNT(*) AS n FROM reconciliation_cases")).toBe(0);
+    expect(count(db, "SELECT COUNT(*) AS n FROM audit_logs")).toBe(0);
+  });
+});
