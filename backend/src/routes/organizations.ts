@@ -31,6 +31,8 @@
  *                                       → routes/conversions.ts  conversionLifecycleRoutes (Phase 4 Unit 10a, advertiser)
  *   /:orgId/conversion-holds(/*)        → routes/conversions.ts  conversionHoldRoutes    (Phase 4 Unit 10a, advertiser)
  *   /:orgId/payouts(/*)                 → routes/payouts.ts      payoutRoutes            (Phase 5 Unit 13a, affiliate)
+ *   /:orgId/platform/payouts, /:orgId/platform/affiliates/:affiliateOrgId/payouts(/*)
+ *                                       → routes/payouts.ts      platformPayoutRoutes    (Phase 5 Unit 13b, PLATFORM org)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -48,7 +50,7 @@ import { attributionPolicyRoutes, attributionRoutes, conversionRoutes, postbackS
 import { conversionHoldRoutes, conversionLifecycleRoutes } from "./conversions";
 import { complianceRoutes } from "./compliance";
 import { fraudRoutes } from "./fraud";
-import { payoutRoutes } from "./payouts";
+import { payoutRoutes, platformPayoutRoutes } from "./payouts";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 
 const nameSchema = z.string().trim().min(2).max(120);
@@ -93,6 +95,14 @@ organizationRoutes.use("*", requireAuth);
 // Every tenant-scoped route resolves RBAC + tenant scope before its handler.
 organizationRoutes.use("/:orgId", requireOrg);
 organizationRoutes.use("/:orgId/*", requireOrg);
+
+// Phase 5 Unit 13b — PLATFORM payout face. Mounted BEFORE the Phase 2 platform
+// review routers on purpose: `affiliateReviewRoutes` guards `/platform/affiliates/*`
+// with `requirePermission("affiliates.review")`, which finance staff do not hold.
+// Registered first, a matching payout handler answers before that middleware runs;
+// each payout route carries its own payouts.* permission and the service's
+// PLATFORM-org check.
+organizationRoutes.route("/:orgId/platform", platformPayoutRoutes);
 
 // Phase 2 sub-modules (each route adds its own requirePermission).
 organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);

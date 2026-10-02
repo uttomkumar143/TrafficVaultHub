@@ -1,5 +1,6 @@
 /**
- * Payout routes — affiliate face (Phase 5 Unit 13a; PRD §63–§65, §114, §132).
+ * Payout routes — affiliate face (Phase 5 Unit 13a) + platform face (Unit 13b);
+ * PRD §63–§65, §114, §132.
  *
  * Authenticated tenant sub-router mounted by `routes/organizations.ts` UNDER
  * `/:orgId/payouts` (inherits `requireAuth → requireOrg`, adds
@@ -14,12 +15,26 @@
  *                                                        (idempotency_key replay → 200 with the SAME payout, no second row)
  *   POST   /organizations/:orgId/payouts/:payoutId/cancel payouts.review  → 200 { payout }   { reason? }
  *
- * Deliberately NOT here: eligibility / approve / process. Those are finance
- * steps performed by PLATFORM staff on another organization's payout
- * (`routes/payouts-platform.ts`, Unit 13b) — an affiliate must never approve
- * or release its own payout (§132). No route accepts a status, a provider
- * reference or a ledger entry: the state machine, the journal and the money
- * columns are owned by the service / the 0011 triggers.
+ * Deliberately NOT on the affiliate face: eligibility / approve / process.
+ * Those are finance steps performed by PLATFORM staff on another
+ * organization's payout — an affiliate must never approve or release its own
+ * payout (§132). No route accepts a status, a provider reference or a ledger
+ * entry: the state machine, the journal and the money columns are owned by
+ * the service / the 0011 triggers.
+ *
+ * Platform face (`platformPayoutRoutes`, mounted UNDER
+ * `/:orgId/platform` where `:orgId` is the PLATFORM organization; every call
+ * is refused 403 for a non-PLATFORM tenant by `PayoutService.assertPlatform`):
+ *
+ *   GET  /organizations/:platformOrgId/platform/payouts                                        payouts.review  work queue across ALL affiliates  ?status=&limit=&cursor=
+ *   GET  /organizations/:platformOrgId/platform/affiliates/:affiliateOrgId/payouts             payouts.read
+ *   GET  /organizations/:platformOrgId/platform/affiliates/:affiliateOrgId/payouts/:payoutId   payouts.read    { payout, history, attempts }
+ *   POST .../payouts/:payoutId/eligibility   payouts.review   → 200 { outcome, payout, result }
+ *   POST .../payouts/:payoutId/approve       payouts.approve  → 200 { payout }   { note? }     approver ≠ requester (§132)
+ *   POST .../payouts/:payoutId/process       payouts.release  → 200 { outcome, payout, attempt }
+ *   POST .../payouts/:payoutId/cancel        payouts.review   → 200 { payout }   { reason? }
+ *
+ * Malformed affiliate / payout ids → 404 (never an oracle).
  */
 import { Hono, type Context } from "hono";
 import { z } from "zod";
@@ -54,6 +69,7 @@ const requestSchema = z
   .strict();
 
 const cancelSchema = z.object({ reason: z.string().max(2000).nullable().optional() }).strict();
+const approveSchema = z.object({ note: z.string().max(1000).nullable().optional() }).strict();
 
 type Ctx = Context<AppEnv>;
 type ParamCtx = { req: { param(name: string): string | undefined } };
@@ -61,6 +77,13 @@ type ParamCtx = { req: { param(name: string): string | undefined } };
 /** Malformed ids can never match a row → the same 404 as an unknown id (no oracle). */
 export function payoutId(c: ParamCtx): string {
   const parsed = idSchema.safeParse(c.req.param("payoutId"));
+  if (!parsed.success) throw new AppError(404, "NOT_FOUND", "payout not found");
+  return parsed.data;
+}
+
+/** The affiliate organization a platform route targets; malformed → 404 like an unknown id. */
+export function affiliateOrgId(c: ParamCtx): string {
+  const parsed = idSchema.safeParse(c.req.param("affiliateOrgId"));
   if (!parsed.success) throw new AppError(404, "NOT_FOUND", "payout not found");
   return parsed.data;
 }
@@ -110,5 +133,52 @@ payoutRoutes.get("/:payoutId", requirePermission("payouts.read"), async (c) => {
 payoutRoutes.post("/:payoutId/cancel", requirePermission("payouts.review"), async (c) => {
   const body = await parseJsonBody(c, cancelSchema);
   const payout = await buildPayoutService(c).cancel(c.get("auth"), c.get("tenant"), payoutId(c), body.reason ?? null, meta(c));
+  return c.json({ payout }, 200);
+});
+
+// ---- platform face ------------------------------------------------------------------------
+
+export const platformPayoutRoutes = new Hono<AppEnv>();
+
+const AFF = "/affiliates/:affiliateOrgId/payouts";
+
+platformPayoutRoutes.get("/payouts", requirePermission("payouts.review"), async (c) => {
+  const page = parsePageRequest((n) => c.req.query(n));
+  const status = payoutStatusFilter(c.req.query("status"));
+  const result = await buildPayoutService(c).listAll(c.get("tenant"), page, status ? { status } : {});
+  return c.json(result, 200);
+});
+
+platformPayoutRoutes.get(AFF, requirePermission("payouts.read"), async (c) => {
+  const page = parsePageRequest((n) => c.req.query(n));
+  const status = payoutStatusFilter(c.req.query("status"));
+  const result = await buildPayoutService(c).listFor(c.get("tenant"), affiliateOrgId(c), page, status ? { status } : {});
+  return c.json(result, 200);
+});
+
+platformPayoutRoutes.get(`${AFF}/:payoutId`, requirePermission("payouts.read"), async (c) => {
+  const detail = await buildPayoutService(c).getPayoutFor(c.get("tenant"), affiliateOrgId(c), payoutId(c));
+  return c.json(detail, 200);
+});
+
+platformPayoutRoutes.post(`${AFF}/:payoutId/eligibility`, requirePermission("payouts.review"), async (c) => {
+  const run = await buildPayoutService(c).runEligibilityFor(c.get("auth"), c.get("tenant"), affiliateOrgId(c), payoutId(c), meta(c));
+  return c.json(run, 200);
+});
+
+platformPayoutRoutes.post(`${AFF}/:payoutId/approve`, requirePermission("payouts.approve"), async (c) => {
+  const body = await parseJsonBody(c, approveSchema);
+  const payout = await buildPayoutService(c).approveFor(c.get("auth"), c.get("tenant"), affiliateOrgId(c), payoutId(c), body.note ?? null, meta(c));
+  return c.json({ payout }, 200);
+});
+
+platformPayoutRoutes.post(`${AFF}/:payoutId/process`, requirePermission("payouts.release"), async (c) => {
+  const result = await buildPayoutService(c).processFor(c.get("auth"), c.get("tenant"), affiliateOrgId(c), payoutId(c), meta(c));
+  return c.json(result, 200);
+});
+
+platformPayoutRoutes.post(`${AFF}/:payoutId/cancel`, requirePermission("payouts.review"), async (c) => {
+  const body = await parseJsonBody(c, cancelSchema);
+  const payout = await buildPayoutService(c).cancelFor(c.get("auth"), c.get("tenant"), affiliateOrgId(c), payoutId(c), body.reason ?? null, meta(c));
   return c.json({ payout }, 200);
 });
