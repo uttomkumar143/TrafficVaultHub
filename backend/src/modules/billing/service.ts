@@ -38,6 +38,7 @@
  */
 
 import { AppError } from "../../lib/errors";
+import { slicePage, type Page, type PageRequest } from "../../lib/pagination";
 import { scopedQuery, type TenantId } from "../../lib/tenant-scope";
 import { hasPermission, type TenantContext } from "../../middleware/require-org";
 import type { AuditRepository } from "../audit/repository";
@@ -139,6 +140,27 @@ export class BillingRepository {
     )
       .all<FundingAlertRow>()
       .then((r) => r.results);
+  }
+
+  /** Cursor page (PRD §71/§127): newest first, `(created_at, id)` keyset, LIMIT n+1 in SQL. */
+  async listAlertsPage(tenantId: TenantId, page: PageRequest): Promise<Page<FundingAlertRow>> {
+    const where = ["organization_id = ?"];
+    const binds: unknown[] = [];
+    if (page.cursor) {
+      where.push("(created_at < ? OR (created_at = ? AND id < ?))");
+      binds.push(page.cursor.created_at, page.cursor.created_at, page.cursor.id);
+    }
+    const res = await scopedQuery(
+      this.db,
+      `SELECT id, organization_id, billing_profile_id, audience, alert_type, severity, dedupe_key, payload, acknowledged_at, created_at
+         FROM funding_alerts WHERE ${where.join(" AND ")}
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?`,
+      tenantId,
+      ...binds,
+      page.limit + 1,
+    ).all<FundingAlertRow>();
+    return slicePage(res.results, page.limit);
   }
 
   /** Guarded: only flips 0 → 1; a second run matches no row and is a no-op. */
@@ -283,6 +305,12 @@ export class BillingService {
   listMyAlerts(tenant: TenantContext): Promise<FundingAlertRow[]> {
     this.require(tenant, "billing.read");
     return this.billing.listAlerts(tenant.organization.id as TenantId);
+  }
+
+  /** `billing.read`; cursor-paged variant of `listMyAlerts` (newest first). */
+  listMyAlertsPage(tenant: TenantContext, page: PageRequest): Promise<Page<FundingAlertRow>> {
+    this.require(tenant, "billing.read");
+    return this.billing.listAlertsPage(tenant.organization.id as TenantId, page);
   }
 
   // ---- funding protection -----------------------------------------------------

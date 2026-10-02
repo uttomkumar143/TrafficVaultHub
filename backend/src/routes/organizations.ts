@@ -45,6 +45,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../lib/bindings";
 import { AppError } from "../lib/errors";
+import { parsePageRequest } from "../lib/pagination";
 import { requestMeta as meta } from "../lib/request-meta";
 import { parseJsonBody } from "../lib/validation";
 import { requireAuth } from "../middleware/require-auth";
@@ -218,8 +219,10 @@ organizationRoutes.get("/:orgId/roles", requirePermission("organizations.read"),
 });
 
 organizationRoutes.get("/:orgId/members", requirePermission("members.read"), async (c) => {
-  const members = await c.get("organizationService").listMembers(c.get("tenant"));
-  return c.json({ members }, 200);
+  // Additive: keeps the `members` key, adds `next_cursor` (PRD §71/§127).
+  const page = parsePageRequest((n) => c.req.query(n));
+  const result = await c.get("organizationService").listMembersPage(c.get("tenant"), page);
+  return c.json(result, 200);
 });
 
 organizationRoutes.post("/:orgId/members", requirePermission("members.manage"), async (c) => {

@@ -33,6 +33,7 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../lib/bindings";
 import { AppError } from "../lib/errors";
+import { parsePageRequest } from "../lib/pagination";
 import { requestMeta as meta } from "../lib/request-meta";
 import { parseJsonBody } from "../lib/validation";
 import { requirePermission } from "../middleware/require-org";
@@ -74,8 +75,9 @@ billingRoutes.get("/profile", requirePermission("billing.read"), async (c) => {
 });
 
 billingRoutes.get("/alerts", requirePermission("billing.read"), async (c) => {
-  const items = await buildBillingService(c).listMyAlerts(c.get("tenant"));
-  return c.json({ items }, 200);
+  const page = parsePageRequest((n) => c.req.query(n));
+  const result = await buildBillingService(c).listMyAlertsPage(c.get("tenant"), page);
+  return c.json(result, 200);
 });
 
 // ---------------------------------------------------------------------------

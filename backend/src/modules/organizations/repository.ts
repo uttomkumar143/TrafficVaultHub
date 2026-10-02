@@ -7,6 +7,7 @@
  * caller's own ACTIVE membership (`…ForMember(userId, …)`). A row the caller
  * is not a member of is indistinguishable from a non-existent one.
  */
+import { slicePage, type Page, type PageRequest } from "../../lib/pagination";
 import { nowIso } from "../../lib/time";
 
 export type OrganizationType = "PLATFORM" | "ADVERTISER" | "AFFILIATE" | "PARTNER" | "AGENCY";
@@ -214,6 +215,31 @@ export class OrganizationRepository {
       .bind(organizationId)
       .all<MemberRow>();
     return res.results;
+  }
+
+  /**
+   * Cursor page of non-removed members (PRD §71/§127): newest first on
+   * `(m.created_at, m.id)`, LIMIT n+1 in SQL. The owner-first ordering of
+   * `listMembers` is not preserved here — keyset pagination needs a total,
+   * stable sort key.
+   */
+  async listMembersPage(organizationId: string, page: PageRequest): Promise<Page<MemberRow>> {
+    const where = ["m.organization_id = ?", "m.status <> 'REMOVED'"];
+    const binds: unknown[] = [organizationId];
+    if (page.cursor) {
+      where.push("(m.created_at < ? OR (m.created_at = ? AND m.id < ?))");
+      binds.push(page.cursor.created_at, page.cursor.created_at, page.cursor.id);
+    }
+    const res = await this.db
+      .prepare(
+        `${MEMBER_SELECT}
+          WHERE ${where.join(" AND ")}
+          ORDER BY m.created_at DESC, m.id DESC
+          LIMIT ?`,
+      )
+      .bind(...binds, page.limit + 1)
+      .all<MemberRow>();
+    return slicePage(res.results, page.limit);
   }
 
   /** Any membership row (including REMOVED) for this org + user, or null. */

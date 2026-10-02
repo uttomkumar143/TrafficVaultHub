@@ -51,6 +51,7 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../lib/bindings";
 import { AppError } from "../lib/errors";
+import { parsePageRequest } from "../lib/pagination";
 import { requestMeta as meta } from "../lib/request-meta";
 import { tenantIdOf } from "../lib/tenant-scope";
 import { parseJsonBody } from "../lib/validation";
@@ -222,8 +223,9 @@ ledgerRoutes.get("/reserves", requirePermission("ledger.read"), async (c) => {
   const status = reserveStatusQuery(c);
   const rawCurrency = c.req.query("currency");
   const currency = rawCurrency ? currencyQuery(c) : undefined;
-  const items = await buildLedgerServices(c).reserves.list(c.get("tenant"), { ...(status ? { status } : {}), ...(currency ? { currency } : {}) });
-  return c.json({ items }, 200);
+  const page = parsePageRequest((n) => c.req.query(n));
+  const result = await buildLedgerServices(c).reserves.listPage(c.get("tenant"), page, { ...(status ? { status } : {}), ...(currency ? { currency } : {}) });
+  return c.json(result, 200);
 });
 
 ledgerRoutes.get("/reserves/:reserveId", requirePermission("ledger.read"), async (c) => {

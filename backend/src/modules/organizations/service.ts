@@ -24,6 +24,7 @@
  *   ROLE_NOT_ALLOWED_FOR_ORG_TYPE 400 · LAST_OWNER 409 · SELF_MODIFICATION 400
  */
 import { AppError } from "../../lib/errors";
+import type { PageRequest } from "../../lib/pagination";
 import { AuditRepository } from "../audit/repository";
 import type { TenantContext } from "../../middleware/require-org";
 import type { RequestMeta } from "../auth/repository";
@@ -197,6 +198,12 @@ export class OrganizationService {
   /** Requires `members.read` (enforced by middleware). */
   async listMembers(tenant: TenantContext): Promise<PublicMember[]> {
     return (await this.repo.listMembers(tenant.organization.id)).map(toPublicMember);
+  }
+
+  /** Cursor-paged members (newest first); `next_cursor` is null when exhausted. */
+  async listMembersPage(tenant: TenantContext, page: PageRequest): Promise<{ members: PublicMember[]; next_cursor: string | null }> {
+    const result = await this.repo.listMembersPage(tenant.organization.id, page);
+    return { members: result.items.map(toPublicMember), next_cursor: result.next_cursor };
   }
 
   /**

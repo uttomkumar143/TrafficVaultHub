@@ -132,7 +132,7 @@ describe("billing HTTP — tenant face", () => {
     expect(profile.credit_limit_minor).toBe(10_000);
     expect(Number.isInteger(profile.credit_limit_minor)).toBe(true);
 
-    expect(await json<{ items: unknown[] }>(await h.as(a.token, "GET", B(a.orgId, "/alerts")))).toEqual({ items: [] });
+    expect(await json<{ items: unknown[] }>(await h.as(a.token, "GET", B(a.orgId, "/alerts")))).toEqual({ items: [], next_cursor: null });
 
     // RBAC inside the advertiser org: BILLING_MANAGER reads, VIEWER is refused.
     const billingMgr = await member(a.token, a.orgId, "bm@acme.example", "BILLING_MANAGER");

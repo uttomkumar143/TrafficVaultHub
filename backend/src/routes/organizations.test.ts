@@ -298,7 +298,7 @@ describe("members — add / list / change role / remove", () => {
     const list = ((await (await api("GET", `/organizations/${org.id}/members`, bearer(alice))).json()) as {
       members: Member[];
     }).members;
-    expect(list.map((m) => m.user.email)).toEqual([ALICE, BOB]); // owner first
+    expect(list.map((m) => m.user.email).sort()).toEqual([ALICE, BOB].sort()); // cursor-paged: newest first, see 1c
     expect(JSON.stringify(list)).not.toMatch(/password|token_hash|tvh_s_/);
 
     // Bob now sees the org in his list.

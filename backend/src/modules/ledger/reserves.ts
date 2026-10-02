@@ -35,6 +35,7 @@
  */
 
 import { AppError } from "../../lib/errors";
+import { slicePage, type Page, type PageRequest } from "../../lib/pagination";
 import { scopedQuery, tenantIdOf, type TenantId } from "../../lib/tenant-scope";
 import { hasPermission, type TenantContext } from "../../middleware/require-org";
 import type { AuditRepository } from "../audit/repository";
@@ -156,6 +157,35 @@ export class ReserveRepository {
     }
     const { results } = await scopedQuery(this.db, `SELECT * FROM reserves WHERE ${clauses.join(" AND ")} ORDER BY created_at, rowid`, tenantId, ...params).all<ReserveRow>();
     return results;
+  }
+
+  /**
+   * Cursor page (PRD §71/§127): newest first, `(created_at, id)` keyset, LIMIT n+1
+   * in SQL so the table is never pulled into memory.
+   */
+  async listPage(tenantId: TenantId, page: PageRequest, filter: { status?: ReserveStatus; currency?: string } = {}): Promise<Page<ReserveRow>> {
+    const clauses = ["organization_id = ?"];
+    const params: unknown[] = [];
+    if (filter.status) {
+      clauses.push("status = ?");
+      params.push(filter.status);
+    }
+    if (filter.currency) {
+      clauses.push("currency = ?");
+      params.push(filter.currency);
+    }
+    if (page.cursor) {
+      clauses.push("(created_at < ? OR (created_at = ? AND id < ?))");
+      params.push(page.cursor.created_at, page.cursor.created_at, page.cursor.id);
+    }
+    const { results } = await scopedQuery(
+      this.db,
+      `SELECT * FROM reserves WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC, id DESC LIMIT ?`,
+      tenantId,
+      ...params,
+      page.limit + 1,
+    ).all<ReserveRow>();
+    return slicePage(results, page.limit);
   }
 
   /** Σ ACTIVE reserves in `currency` only — other currencies never enter the computation. */
@@ -293,6 +323,11 @@ export class ReserveService {
   list(tenant: TenantContext, filter: { status?: ReserveStatus; currency?: string } = {}): Promise<ReserveRow[]> {
     this.require(tenant, "ledger.read");
     return this.reserves.list(tenantIdOf(tenant), filter);
+  }
+
+  listPage(tenant: TenantContext, page: PageRequest, filter: { status?: ReserveStatus; currency?: string } = {}): Promise<Page<ReserveRow>> {
+    this.require(tenant, "ledger.read");
+    return this.reserves.listPage(tenantIdOf(tenant), page, filter);
   }
 
   available(tenant: TenantContext, currency: string): Promise<AvailableBalance> {
