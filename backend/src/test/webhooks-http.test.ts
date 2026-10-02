@@ -503,6 +503,12 @@ describe("webhooks HTTP â€” delivery lifecycle through the scripted transport (Â
     expect(await WebhookService.verifySignature(secret, req.headers, req.body, { seenEventIds: seen })).toBe(true);
     expect(seen.has(d.event_id)).toBe(true);
     expect(await WebhookService.verifySignature(secret, req.headers, req.body, { seenEventIds: seen })).toBe(false);
+    // isReplay is the standalone in-window check receivers can run before any crypto work.
+    expect(WebhookService.isReplay(req.headers, seen)).toBe(true);
+    expect(WebhookService.isReplay(req.headers, new Set())).toBe(false);
+    expect(WebhookService.isReplay({ ...req.headers, [WEBHOOK_HEADERS.eventId]: "" }, new Set())).toBe(true);
+    // The webhook window is the shared postback constant (300s), not a second copy.
+    expect(WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS).toBe(300);
     const body = JSON.parse(req.body) as { id: string; type: string; data: Record<string, unknown>; reference: { type: string; id: string } };
     expect(body.id).toBe(d.event_id);
     expect(body.type).toBe("conversion_updated");

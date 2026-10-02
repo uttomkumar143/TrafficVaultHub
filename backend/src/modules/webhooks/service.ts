@@ -51,7 +51,9 @@ import type { AuthenticatedContext } from "../auth/service";
 import type { PermissionKey } from "../rbac/permissions";
 import {
   CURRENT_KEY_VERSION,
+  DEFAULT_TIMESTAMP_TOLERANCE_SECONDS,
   PostbackVaultError,
+  isTimestampFresh,
   secretHint,
   signPostback,
   unwrapPostbackSecret,
@@ -90,7 +92,7 @@ export const WEBHOOK_SIGNATURE_PATH = "/webhook";
  * Retries re-sign with a fresh timestamp, so a legitimately delayed delivery is
  * never rejected by this window.
  */
-export const WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 300;
+export const WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = DEFAULT_TIMESTAMP_TOLERANCE_SECONDS;
 export const URL_MAX_LENGTH = 2048;
 export const DESCRIPTION_MAX_LENGTH = 500;
 export const DEFAULT_MAX_ATTEMPTS = 5;
@@ -615,13 +617,26 @@ export class WebhookService {
 
     const tolerance = options.toleranceSeconds ?? WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS;
     const now = options.now ?? Math.floor(Date.now() / 1000);
-    if (Math.abs(now - ts) > tolerance) return false;
+    if (!isTimestampFresh(ts, now, tolerance)) return false;
 
-    if (options.seenEventIds?.has(eventId)) return false;
+    if (options.seenEventIds && WebhookService.isReplay(headers, options.seenEventIds)) return false;
 
     const ok = await verifyPostbackSignature(secret, { method: "POST", path: WEBHOOK_SIGNATURE_PATH, timestamp: ts, nonce: eventId, body }, sig);
     if (ok) options.seenEventIds?.add(eventId);
     return ok;
+  }
+
+  /**
+   * In-window replay check (PRD §80 / §116): a request whose `x-tvh-event-id`
+   * has already been accepted by this receiver is a replay, however valid its
+   * signature. Receivers only need to retain ids for one tolerance window —
+   * anything older is already rejected by the freshness check in
+   * {@link verifySignature}. A missing event id counts as a replay (reject).
+   */
+  static isReplay(headers: Record<string, string>, seen: { has(id: string): boolean }): boolean {
+    const eventId = headers[WEBHOOK_HEADERS.eventId];
+    if (!eventId) return true;
+    return seen.has(eventId);
   }
 
   // ---- internals ---------------------------------------------------------------------
