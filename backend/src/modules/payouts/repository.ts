@@ -304,6 +304,31 @@ export class PayoutRepository {
     return slicePage(res.results, page.limit);
   }
 
+  /**
+   * PLATFORM finance work queue — the ONLY deliberately unscoped payout read.
+   * It bypasses `scopedQuery` on purpose: the queue spans every affiliate
+   * organization. Callers MUST be PLATFORM + `payouts.review`
+   * (`PayoutService.listAll`); nothing else may use this method.
+   */
+  async listPageAll(page: PageRequest, filter: { status?: PayoutStatus } = {}): Promise<Page<PayoutRow>> {
+    const where: string[] = [];
+    const binds: unknown[] = [];
+    if (filter.status !== undefined) {
+      where.push("status = ?");
+      binds.push(filter.status);
+    }
+    if (page.cursor) {
+      where.push("(created_at < ? OR (created_at = ? AND id < ?))");
+      binds.push(page.cursor.created_at, page.cursor.created_at, page.cursor.id);
+    }
+    const sql = `SELECT * FROM payouts${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, id DESC LIMIT ?`;
+    const res = await this.db
+      .prepare(sql)
+      .bind(...binds, page.limit + 1)
+      .all<PayoutRow>();
+    return slicePage(res.results, page.limit);
+  }
+
   async listStatusHistory(tenantId: TenantId, payoutId: string): Promise<PayoutStatusHistoryRow[]> {
     const res = await scopedQuery(
       this.db,

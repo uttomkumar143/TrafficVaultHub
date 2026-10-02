@@ -24,6 +24,15 @@
  * money is never silently lost; process() on a PROCESSING payout replays the provider
  * call (same idempotency key) and retries the posting.
  *
+ * Faces (Unit 13b): payouts belong to the AFFILIATE organization; finance staff are
+ * PLATFORM organization members. The public tenant methods (request / runEligibility /
+ * approve / process / cancel / getPayout / list) act on the caller's own tenant with a
+ * `sameTenantActor`. The `*For` methods are the PLATFORM face: `assertPlatform` +
+ * permission, then the SAME private `*As(tenantId, actor, …)` core runs against the
+ * affiliate tenant with a `platformActor` (history/attempt actor PLATFORM, audit row on
+ * the affiliate organization, metadata carries actor_organization_id + actor_type).
+ * `listAll` is the one deliberately unscoped read (finance work queue, payouts.review).
+ *
  * Provider idempotency: payouts.idempotency_key is the provider idempotency key; the
  * same key always yields the same provider_reference (0011 freezes it once set).
  * Money: INTEGER minor units + ISO currency; no floats, no cross-currency math.
@@ -101,6 +110,20 @@ export interface ProcessResult {
   readonly attempt: PayoutAttemptRow;
 }
 
+/**
+ * Who performs a mutation and where its trail is written. `tenant` is the CALLER's
+ * organization (permissions, actor organization); `audit_organization_id` is the
+ * organization that owns the payout (the affiliate) so its audit trail is complete.
+ */
+export interface PayoutActor {
+  readonly ctx: AuthenticatedContext;
+  readonly tenant: TenantContext;
+  readonly audit_organization_id: string;
+  readonly history_actor: PayoutHistoryActor;
+  readonly attempt_actor: PayoutAttemptActor;
+}
+
+const MAX_ORG_ID_LENGTH = 64;
 const DEFAULT_POLICY: PayoutPolicy = { holding_period_days: 0, minimum_minor: {} };
 const CURRENCY_RE = /^[A-Z]{3}$/;
 const FAILURE_CODE_RE = /^[A-Z0-9_]{1,64}$/;
@@ -113,17 +136,30 @@ export function payoutJournalIdempotencyKey(payoutId: string): string {
 
 // ---- pure helpers --------------------------------------------------------------------------
 
-function historyActorOf(tenant: TenantContext): PayoutHistoryActor {
-  return tenant.organization.type === "PLATFORM" ? "PLATFORM" : "TENANT";
-}
-
 function requestedActorOf(tenant: TenantContext): PayoutRequestedActor {
   return tenant.organization.type === "PLATFORM" ? "PLATFORM" : "TENANT";
 }
 
-function attemptActorOf(tenant: TenantContext): PayoutAttemptActor {
-  // payout_attempts forbids TENANT; a non-platform release is recorded as SYSTEM with the user id kept.
-  return tenant.organization.type === "PLATFORM" ? "PLATFORM" : "SYSTEM";
+/** The caller acts on its OWN tenant's payout (affiliate face). */
+export function sameTenantActor(ctx: AuthenticatedContext, tenant: TenantContext): PayoutActor {
+  const platform = tenant.organization.type === "PLATFORM";
+  return {
+    ctx,
+    tenant,
+    audit_organization_id: tenant.organization.id,
+    history_actor: platform ? "PLATFORM" : "TENANT",
+    // payout_attempts forbids TENANT; a non-platform release is recorded as SYSTEM with the user id kept.
+    attempt_actor: platform ? "PLATFORM" : "SYSTEM",
+  };
+}
+
+/** PLATFORM staff act on an AFFILIATE organization's payout (platform face). */
+export function platformActor(ctx: AuthenticatedContext, tenant: TenantContext, affiliateOrgId: string): PayoutActor {
+  return { ctx, tenant, audit_organization_id: affiliateOrgId, history_actor: "PLATFORM", attempt_actor: "PLATFORM" };
+}
+
+function isPlatformActor(actor: PayoutActor): boolean {
+  return actor.audit_organization_id !== actor.tenant.organization.id;
 }
 
 function assertMoney(amount: number, currency: string): void {
@@ -191,15 +227,73 @@ export class PayoutService {
 
   async getPayout(tenant: TenantContext, payoutId: string): Promise<PayoutDetail> {
     this.require(tenant, "payouts.read");
-    const tenantId = tenantIdOf(tenant);
+    return this.getPayoutAs(tenantIdOf(tenant), payoutId);
+  }
+
+  async list(tenant: TenantContext, page: PageRequest, filter: PayoutListFilter = {}): Promise<Page<PayoutRow>> {
+    this.require(tenant, "payouts.read");
+    return this.listAs(tenantIdOf(tenant), page, filter);
+  }
+
+  // ---- platform face (PLATFORM org acting on an AFFILIATE org's payout) -------------------
+
+  /** PLATFORM + payouts.read; one affiliate's payout. */
+  async getPayoutFor(tenant: TenantContext, affiliateOrgId: string, payoutId: string): Promise<PayoutDetail> {
+    this.assertPlatform(tenant);
+    this.require(tenant, "payouts.read");
+    return this.getPayoutAs(this.targetTenantId(affiliateOrgId), payoutId);
+  }
+
+  /** PLATFORM + payouts.read; one affiliate's payouts. */
+  async listFor(tenant: TenantContext, affiliateOrgId: string, page: PageRequest, filter: PayoutListFilter = {}): Promise<Page<PayoutRow>> {
+    this.assertPlatform(tenant);
+    this.require(tenant, "payouts.read");
+    return this.listAs(this.targetTenantId(affiliateOrgId), page, filter);
+  }
+
+  /** PLATFORM + payouts.review; the finance work queue across ALL affiliates (the only unscoped read). */
+  async listAll(tenant: TenantContext, page: PageRequest, filter: PayoutListFilter = {}): Promise<Page<PayoutRow>> {
+    this.assertPlatform(tenant);
+    this.require(tenant, "payouts.review");
+    return this.repo.listPageAll(page, filter.status === undefined ? {} : { status: filter.status });
+  }
+
+  /** PLATFORM + payouts.review. */
+  async runEligibilityFor(ctx: AuthenticatedContext, tenant: TenantContext, affiliateOrgId: string, payoutId: string, meta: RequestMeta): Promise<EligibilityRunResult> {
+    this.assertPlatform(tenant);
+    this.require(tenant, "payouts.review");
+    return this.runEligibilityAs(this.targetTenantId(affiliateOrgId), platformActor(ctx, tenant, affiliateOrgId), payoutId, meta);
+  }
+
+  /** PLATFORM + payouts.approve; approver ≠ requester (§132) exactly as on the tenant face. */
+  async approveFor(ctx: AuthenticatedContext, tenant: TenantContext, affiliateOrgId: string, payoutId: string, note: string | null | undefined, meta: RequestMeta): Promise<PayoutRow> {
+    this.assertPlatform(tenant);
+    this.require(tenant, "payouts.approve");
+    return this.approveAs(this.targetTenantId(affiliateOrgId), platformActor(ctx, tenant, affiliateOrgId), payoutId, note, meta);
+  }
+
+  /** PLATFORM + payouts.release. */
+  async processFor(ctx: AuthenticatedContext, tenant: TenantContext, affiliateOrgId: string, payoutId: string, meta: RequestMeta): Promise<ProcessResult> {
+    this.assertPlatform(tenant);
+    this.require(tenant, "payouts.release");
+    return this.processAs(this.targetTenantId(affiliateOrgId), platformActor(ctx, tenant, affiliateOrgId), payoutId, meta);
+  }
+
+  /** PLATFORM + payouts.review. */
+  async cancelFor(ctx: AuthenticatedContext, tenant: TenantContext, affiliateOrgId: string, payoutId: string, reason: string | null | undefined, meta: RequestMeta): Promise<PayoutRow> {
+    this.assertPlatform(tenant);
+    this.require(tenant, "payouts.review");
+    return this.cancelAs(this.targetTenantId(affiliateOrgId), platformActor(ctx, tenant, affiliateOrgId), payoutId, reason, meta);
+  }
+
+  private async getPayoutAs(tenantId: TenantId, payoutId: string): Promise<PayoutDetail> {
     const payout = await this.mustFind(tenantId, payoutId);
     const [history, attempts] = await Promise.all([this.repo.listStatusHistory(tenantId, payoutId), this.repo.listAttempts(tenantId, payoutId)]);
     return { payout, history, attempts };
   }
 
-  async list(tenant: TenantContext, page: PageRequest, filter: PayoutListFilter = {}): Promise<Page<PayoutRow>> {
-    this.require(tenant, "payouts.read");
-    return this.repo.listPage(tenantIdOf(tenant), page, filter.status === undefined ? {} : { status: filter.status });
+  private listAs(tenantId: TenantId, page: PageRequest, filter: PayoutListFilter): Promise<Page<PayoutRow>> {
+    return this.repo.listPage(tenantId, page, filter.status === undefined ? {} : { status: filter.status });
   }
 
   // ---- request -----------------------------------------------------------------------------
@@ -239,6 +333,7 @@ export class PayoutService {
     const now = this.now().toISOString();
     const id = crypto.randomUUID();
     const actor = requestedActorOf(tenant);
+    const by = sameTenantActor(ctx, tenant);
     try {
       await this.repo.batch([
         this.repo.insertStatement(
@@ -257,8 +352,8 @@ export class PayoutService {
           },
           now,
         ),
-        this.historyStatement(tenantId, id, null, "REQUESTED", ctx, tenant, "REQUESTED", null, meta, now),
-        this.auditStatement(tenant, ctx, "payout.requested", id, meta, {
+        this.historyStatement(tenantId, id, null, "REQUESTED", by, "REQUESTED", null, meta, now),
+        this.auditStatement(by, "payout.requested", id, meta, {
           amount_minor: input.amount_minor,
           currency: input.currency,
           payout_method_id: method.id,
@@ -283,7 +378,10 @@ export class PayoutService {
 
   async runEligibility(ctx: AuthenticatedContext, tenant: TenantContext, payoutId: string, meta: RequestMeta): Promise<EligibilityRunResult> {
     this.require(tenant, "payouts.review");
-    const tenantId = tenantIdOf(tenant);
+    return this.runEligibilityAs(tenantIdOf(tenant), sameTenantActor(ctx, tenant), payoutId, meta);
+  }
+
+  private async runEligibilityAs(tenantId: TenantId, by: PayoutActor, payoutId: string, meta: RequestMeta): Promise<EligibilityRunResult> {
     const row = await this.mustFind(tenantId, payoutId);
     this.assertEdge(row, "ELIGIBILITY_CHECK");
     const now = this.now().toISOString();
@@ -298,21 +396,20 @@ export class PayoutService {
     // REQUESTED → ELIGIBILITY_CHECK → (UNDER_REVIEW | FAILED) in ONE batch; history for both edges.
     const ok = await this.repo.batch([
       this.repo.statusStatement(tenantId, payoutId, "REQUESTED", "ELIGIBILITY_CHECK", now),
-      this.historyStatement(tenantId, payoutId, "REQUESTED", "ELIGIBILITY_CHECK", ctx, tenant, "ELIGIBILITY_RUN", null, meta, now),
+      this.historyStatement(tenantId, payoutId, "REQUESTED", "ELIGIBILITY_CHECK", by, "ELIGIBILITY_RUN", null, meta, now),
       this.repo.statusStatement(tenantId, payoutId, "ELIGIBILITY_CHECK", to, now, extra),
       this.historyStatement(
         tenantId,
         payoutId,
         "ELIGIBILITY_CHECK",
         to,
-        ctx,
-        tenant,
+        by,
         result.eligible ? "ELIGIBLE" : ELIGIBILITY_FAILURE_CODE,
         result.eligible ? null : truncate(reasons.join(","), 1000),
         meta,
         now,
       ),
-      this.auditStatement(tenant, ctx, result.eligible ? "payout.eligible" : "payout.ineligible", payoutId, meta, {
+      this.auditStatement(by, result.eligible ? "payout.eligible" : "payout.ineligible", payoutId, meta, {
         from: "REQUESTED",
         to,
         reasons,
@@ -329,7 +426,11 @@ export class PayoutService {
 
   async approve(ctx: AuthenticatedContext, tenant: TenantContext, payoutId: string, note: string | null | undefined, meta: RequestMeta): Promise<PayoutRow> {
     this.require(tenant, "payouts.approve");
-    const tenantId = tenantIdOf(tenant);
+    return this.approveAs(tenantIdOf(tenant), sameTenantActor(ctx, tenant), payoutId, note, meta);
+  }
+
+  private async approveAs(tenantId: TenantId, by: PayoutActor, payoutId: string, note: string | null | undefined, meta: RequestMeta): Promise<PayoutRow> {
+    const { ctx } = by;
     const row = await this.mustFind(tenantId, payoutId);
     this.assertEdge(row, "APPROVED", { approved_by_user_id: ctx.user.id, requested_by_user_id: row.requested_by_user_id });
     const approvalNote = checkNote(note);
@@ -347,8 +448,8 @@ export class PayoutService {
         approved_at: now,
         approval_note: approvalNote,
       }),
-      this.historyStatement(tenantId, payoutId, "UNDER_REVIEW", "APPROVED", ctx, tenant, "APPROVED", approvalNote, meta, now),
-      this.auditStatement(tenant, ctx, "payout.approved", payoutId, meta, {
+      this.historyStatement(tenantId, payoutId, "UNDER_REVIEW", "APPROVED", by, "APPROVED", approvalNote, meta, now),
+      this.auditStatement(by, "payout.approved", payoutId, meta, {
         from: "UNDER_REVIEW",
         to: "APPROVED",
         approved_by_user_id: ctx.user.id,
@@ -364,7 +465,11 @@ export class PayoutService {
 
   async process(ctx: AuthenticatedContext, tenant: TenantContext, payoutId: string, meta: RequestMeta): Promise<ProcessResult> {
     this.require(tenant, "payouts.release");
-    const tenantId = tenantIdOf(tenant);
+    return this.processAs(tenantIdOf(tenant), sameTenantActor(ctx, tenant), payoutId, meta);
+  }
+
+  private async processAs(tenantId: TenantId, by: PayoutActor, payoutId: string, meta: RequestMeta): Promise<ProcessResult> {
+    const { ctx } = by;
     const row = await this.mustFind(tenantId, payoutId);
     const from = row.status;
     if (from !== "APPROVED" && from !== "FAILED" && from !== "PROCESSING") {
@@ -378,12 +483,12 @@ export class PayoutService {
     const now = this.now().toISOString();
     const attemptId = crypto.randomUUID();
     const attemptNumber = await this.repo.nextAttemptNumber(tenantId, payoutId);
-    const attemptActor = attemptActorOf(tenant);
+    const attemptActor = by.attempt_actor;
     const statements: D1PreparedStatement[] = [];
     if (from !== "PROCESSING") {
       statements.push(
         this.repo.statusStatement(tenantId, payoutId, from, "PROCESSING", now, from === "FAILED" ? { failure_code: null, failure_reason: null } : {}),
-        this.historyStatement(tenantId, payoutId, from, "PROCESSING", ctx, tenant, from === "FAILED" ? "RETRY" : "RELEASED", null, meta, now),
+        this.historyStatement(tenantId, payoutId, from, "PROCESSING", by, from === "FAILED" ? "RETRY" : "RELEASED", null, meta, now),
       );
     }
 
@@ -424,8 +529,8 @@ export class PayoutService {
       statements.push(
         this.repo.attemptStatement(tenantId, { ...attemptBase, outcome: "FAILED", error_code: failure_code, error_message: failure_reason }, now),
         this.repo.statusStatement(tenantId, payoutId, "PROCESSING", "FAILED", now, { failure_code, failure_reason }),
-        this.historyStatement(tenantId, payoutId, "PROCESSING", "FAILED", ctx, tenant, failure_code, failure_reason, meta, now, "PROVIDER"),
-        this.auditStatement(tenant, ctx, "payout.failed", payoutId, meta, { from, failure_code, attempt_number: attemptNumber, retryable: providerErr.retryable }),
+        this.historyStatement(tenantId, payoutId, "PROCESSING", "FAILED", by, failure_code, failure_reason, meta, now, "PROVIDER"),
+        this.auditStatement(by, "payout.failed", payoutId, meta, { from, failure_code, attempt_number: attemptNumber, retryable: providerErr.retryable }),
       );
       return this.finish(tenantId, payoutId, attemptId, row.status, statements, "FAILED");
     }
@@ -440,8 +545,8 @@ export class PayoutService {
       statements.push(
         this.repo.attemptStatement(tenantId, { ...attemptBase, outcome: "REJECTED", error_code: failure_code, error_message: failure_reason }, now),
         this.repo.statusStatement(tenantId, payoutId, "PROCESSING", "FAILED", now, { ...providerExtra, failure_code, failure_reason }),
-        this.historyStatement(tenantId, payoutId, "PROCESSING", "FAILED", ctx, tenant, failure_code, failure_reason, meta, now, "PROVIDER"),
-        this.auditStatement(tenant, ctx, "payout.failed", payoutId, meta, { ...auditBase, failure_code }),
+        this.historyStatement(tenantId, payoutId, "PROCESSING", "FAILED", by, failure_code, failure_reason, meta, now, "PROVIDER"),
+        this.auditStatement(by, "payout.failed", payoutId, meta, { ...auditBase, failure_code }),
       );
       return this.finish(tenantId, payoutId, attemptId, row.status, statements, "FAILED");
     }
@@ -450,7 +555,7 @@ export class PayoutService {
       statements.push(
         this.repo.attemptStatement(tenantId, { ...attemptBase, outcome: "ACCEPTED", response_code: "PENDING" }, now),
         this.repo.statusStatement(tenantId, payoutId, "PROCESSING", "PROCESSING", now, providerExtra),
-        this.auditStatement(tenant, ctx, "payout.pending", payoutId, meta, auditBase),
+        this.auditStatement(by, "payout.pending", payoutId, meta, auditBase),
       );
       return this.finish(tenantId, payoutId, attemptId, row.status, statements, "PENDING");
     }
@@ -471,7 +576,7 @@ export class PayoutService {
           detail: built.detail ?? null,
           request_id: meta.request_id ?? null,
         }),
-        this.auditStatement(tenant, ctx, "payout.ledger_posting_failed", payoutId, meta, { ...auditBase, reason_code: built.reason_code }),
+        this.auditStatement(by, "payout.ledger_posting_failed", payoutId, meta, { ...auditBase, reason_code: built.reason_code }),
       );
       const ok = await this.repo.batch(statements);
       if (!ok) throw new AppError(409, "PAYOUT_STATE_CONFLICT", `payout is no longer ${row.status}`);
@@ -489,8 +594,8 @@ export class PayoutService {
       ...journal.statements,
       this.repo.attemptStatement(tenantId, { ...attemptBase, outcome: "SUCCEEDED", response_code: "PAID" }, now),
       this.repo.statusStatement(tenantId, payoutId, "PROCESSING", "PAID", now, { ...providerExtra, paid_at: now, journal_id: journalId, failure_code: null, failure_reason: null }),
-      this.historyStatement(tenantId, payoutId, "PROCESSING", "PAID", ctx, tenant, "PAID", null, meta, now, "PROVIDER"),
-      this.auditStatement(tenant, ctx, "payout.paid", payoutId, meta, { ...auditBase, journal_id: journalId, amount_minor: row.amount_minor, currency: row.currency }),
+      this.historyStatement(tenantId, payoutId, "PROCESSING", "PAID", by, "PAID", null, meta, now, "PROVIDER"),
+      this.auditStatement(by, "payout.paid", payoutId, meta, { ...auditBase, journal_id: journalId, amount_minor: row.amount_minor, currency: row.currency }),
     );
     return this.finish(tenantId, payoutId, attemptId, row.status, statements, "PAID");
   }
@@ -499,7 +604,10 @@ export class PayoutService {
 
   async cancel(ctx: AuthenticatedContext, tenant: TenantContext, payoutId: string, reason: string | null | undefined, meta: RequestMeta): Promise<PayoutRow> {
     this.require(tenant, "payouts.review");
-    const tenantId = tenantIdOf(tenant);
+    return this.cancelAs(tenantIdOf(tenant), sameTenantActor(ctx, tenant), payoutId, reason, meta);
+  }
+
+  private async cancelAs(tenantId: TenantId, by: PayoutActor, payoutId: string, reason: string | null | undefined, meta: RequestMeta): Promise<PayoutRow> {
     const row = await this.mustFind(tenantId, payoutId);
     if (!CANCELLABLE_PAYOUT_STATUSES.includes(row.status)) {
       throw new AppError(409, "INVALID_PAYOUT_TRANSITION", `cannot cancel a payout in status ${row.status}`);
@@ -509,8 +617,8 @@ export class PayoutService {
     const now = this.now().toISOString();
     const ok = await this.repo.batch([
       this.repo.statusStatement(tenantId, payoutId, row.status, "CANCELLED", now, { cancelled_at: now, cancel_reason: cancelReason }),
-      this.historyStatement(tenantId, payoutId, row.status, "CANCELLED", ctx, tenant, "CANCELLED", cancelReason, meta, now),
-      this.auditStatement(tenant, ctx, "payout.cancelled", payoutId, meta, { from: row.status, to: "CANCELLED", reason: cancelReason }),
+      this.historyStatement(tenantId, payoutId, row.status, "CANCELLED", by, "CANCELLED", cancelReason, meta, now),
+      this.auditStatement(by, "payout.cancelled", payoutId, meta, { from: row.status, to: "CANCELLED", reason: cancelReason }),
     ]);
     if (!ok) throw new AppError(409, "PAYOUT_STATE_CONFLICT", `payout is no longer ${row.status}`);
     return this.mustFind(tenantId, payoutId);
@@ -590,6 +698,18 @@ export class PayoutService {
     if (!hasPermission(tenant, key)) throw new AppError(403, "FORBIDDEN", `missing permission ${key}`);
   }
 
+  private assertPlatform(tenant: TenantContext): void {
+    if (tenant.organization.type !== "PLATFORM") throw new AppError(403, "FORBIDDEN", "platform organization required");
+  }
+
+  /** The affiliate organization a platform call targets; malformed ids can never match → 404 (no oracle). */
+  private targetTenantId(affiliateOrgId: string): TenantId {
+    if (typeof affiliateOrgId !== "string" || affiliateOrgId.length === 0 || affiliateOrgId.length > MAX_ORG_ID_LENGTH) {
+      throw new AppError(404, "PAYOUT_NOT_FOUND", "payout not found");
+    }
+    return affiliateOrgId as TenantId;
+  }
+
   private async mustFind(tenantId: TenantId, payoutId: string): Promise<PayoutRow> {
     const row = await this.repo.findById(tenantId, payoutId);
     if (!row) throw new AppError(404, "PAYOUT_NOT_FOUND", "payout not found");
@@ -601,8 +721,7 @@ export class PayoutService {
     payoutId: string,
     from: PayoutStatus | null,
     to: PayoutStatus,
-    ctx: AuthenticatedContext,
-    tenant: TenantContext,
+    by: PayoutActor,
     reasonCode: string | null,
     note: string | null,
     meta: RequestMeta,
@@ -616,8 +735,8 @@ export class PayoutService {
         payout_id: payoutId,
         from_status: from,
         to_status: to,
-        actor_user_id: ctx.user.id,
-        actor_type: actorOverride ?? historyActorOf(tenant),
+        actor_user_id: by.ctx.user.id,
+        actor_type: actorOverride ?? by.history_actor,
         reason_code: reasonCode !== null && FAILURE_CODE_RE.test(reasonCode) ? reasonCode : null,
         note,
         request_id: meta.request_id ?? null,
@@ -626,14 +745,19 @@ export class PayoutService {
     );
   }
 
-  private auditStatement(tenant: TenantContext, ctx: AuthenticatedContext, action: string, payoutId: string, meta: RequestMeta, metadata: Record<string, unknown>): D1PreparedStatement {
+  /**
+   * Audit row on the organization that OWNS the payout. A platform actor is
+   * recorded with its own organization + actor_type so the affiliate's trail
+   * shows who (outside the tenant) acted.
+   */
+  private auditStatement(by: PayoutActor, action: string, payoutId: string, meta: RequestMeta, metadata: Record<string, unknown>): D1PreparedStatement {
     return this.audit.statement({
-      organization_id: tenant.organization.id,
-      actor_user_id: ctx.user.id,
+      organization_id: by.audit_organization_id,
+      actor_user_id: by.ctx.user.id,
       action,
       target_type: "payout",
       target_id: payoutId,
-      metadata,
+      metadata: isPlatformActor(by) ? { ...metadata, actor_organization_id: by.tenant.organization.id, actor_type: "PLATFORM" } : metadata,
       meta,
     });
   }
