@@ -307,6 +307,15 @@ export class SupportRepository {
     return this.db.prepare("SELECT type FROM organizations WHERE id = ?").bind(id).first<{ type: string }>();
   }
 
+  /** True when `userId` is an ACTIVE member of `organizationId` (grant vetting for PLATFORM agents). */
+  async isActiveMember(organizationId: string, userId: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT 1 AS ok FROM organization_members WHERE organization_id = ? AND user_id = ? AND status = 'ACTIVE'")
+      .bind(organizationId, userId)
+      .first<{ ok: number }>();
+    return row !== null;
+  }
+
   // ======================================================================================
   // Agent tenant access (PRD §81 7a)
   // ======================================================================================
