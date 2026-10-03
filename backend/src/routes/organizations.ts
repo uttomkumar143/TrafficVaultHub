@@ -43,6 +43,10 @@
  *   /:orgId/notifications(/*)           → routes/notifications.ts notificationRoutes     (Phase 6 Unit 6, any tenant — own feed + preferences)
  *   /:orgId/platform/notifications/tenants/:tenantOrgId/events
  *                                       → routes/notifications.ts platformNotificationRoutes (Phase 6 Unit 6, PLATFORM org producer face)
+ *   /:orgId/support, /:orgId/disputes, /:orgId/appeals
+ *                                       → routes/support.ts, routes/disputes-appeals.ts (Phase 6 Unit 7, tenant faces)
+ *   /:orgId/platform/{support,disputes,appeals}/tenants/:tenantOrgId/...
+ *                                       → platformSupportRoutes, platformDisputeAppealRoutes (Phase 6 Unit 7, PLATFORM org, agent-grant restricted)
  */
 import { Hono } from "hono";
 import { z } from "zod";
@@ -68,6 +72,8 @@ import { payoutRoutes, platformPayoutRoutes } from "./payouts";
 import { offerClickRoutes, trackingLinkRoutes } from "./tracking";
 import { platformWebhookRoutes, webhookRoutes } from "./webhooks";
 import { notificationRoutes, platformNotificationRoutes } from "./notifications";
+import { platformSupportRoutes, supportRoutes } from "./support";
+import { appealRoutes, disputeRoutes, platformDisputeAppealRoutes } from "./disputes-appeals";
 
 const nameSchema = z.string().trim().min(2).max(120);
 const slugSchema = z
@@ -127,6 +133,9 @@ organizationRoutes.route("/:orgId/platform", platformBillingRoutes);
 organizationRoutes.route("/:orgId/platform", platformWebhookRoutes);
 // Phase 6 Unit 6 — platform notification producer face (/platform/notifications/tenants/:tenantOrgId/events), same ordering rule.
 organizationRoutes.route("/:orgId/platform", platformNotificationRoutes);
+// Phase 6 Unit 7 — platform support/disputes/appeals faces (/platform/{support,disputes,appeals}/tenants/:tenantOrgId/...), same ordering rule.
+organizationRoutes.route("/:orgId/platform", platformSupportRoutes);
+organizationRoutes.route("/:orgId/platform", platformDisputeAppealRoutes);
 
 // Phase 2 sub-modules (each route adds its own requirePermission).
 organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
@@ -180,6 +189,10 @@ organizationRoutes.route("/:orgId/api-keys", apiKeyRoutes);
 organizationRoutes.route("/:orgId/webhooks", webhookRoutes);
 // Phase 6 Unit 6 — own in-app feed + preferences (every tenant role holds notifications.read).
 organizationRoutes.route("/:orgId/notifications", notificationRoutes);
+// Phase 6 Unit 7 — tickets (§81), disputes (§82), appeals (§83); tenant faces.
+organizationRoutes.route("/:orgId/support", supportRoutes);
+organizationRoutes.route("/:orgId/disputes", disputeRoutes);
+organizationRoutes.route("/:orgId/appeals", appealRoutes);
 
 organizationRoutes.post("/", async (c) => {
   const body = await parseJsonBody(c, createSchema);
