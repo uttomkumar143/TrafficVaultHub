@@ -3,15 +3,57 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
-**Phase 5 — Finance, Ledger & Payouts** (`08-PHASE5-FINANCE-LEDGER-PAYOUTS.md`) is **COMPLETE,
-all 16 implementation units, code at `7abbe4a` + this docs commit (2026-10-02, Session 58)**; see
-"Phase 5 — unit status", "Phase 5 verification" and "Phase 5 known gaps" below. Do not redo it.
-**Phase 6 (`09-PHASE6-API-WEBHOOKS-INTEGRATIONS-NOTIFICATIONS.md`) is NOT STARTED** — wait for the
+**Phase 6 — API, Webhooks, Integrations & Notifications** (`09-PHASE6-API-WEBHOOKS-INTEGRATIONS-NOTIFICATIONS.md`)
+is **COMPLETE, all 10 units, code at `46672cd` + docs commits `624f6e3` (CHECKLIST) and this one
+(2026-10-04, Session 73)**; see "Phase 6 — unit status", "Phase 6 verification" and "Phase 6 known gaps"
+below. Do not redo it. **Phase 7 (`10-PHASE7-DASHBOARDS-FRONTEND.md`) is NOT STARTED** — wait for the
 user's instruction.
 
-Phase 4 — Conversions, Fraud & Compliance (`07-PHASE4-CONVERSIONS-FRAUD-COMPLIANCE.md`)
-is **COMPLETE, all 11 units, as of `40e0213` (code) + Session 38 docs (2026-09-30)**;
-see "Phase 4 — unit status", "Phase 4 verification" and "Phase 4 known gaps" below. Do not redo it.
+Phase 5 — Finance, Ledger & Payouts is COMPLETE at `7abbe4a` (Session 58); Phase 4 at `40e0213`
+(Session 38). Their sections below are kept for reference. Do not redo them.
+
+## Phase 6 — unit status (code `46672cd`, 2026-10-04)
+
+Migration is repo-root `migrations/0012_api_webhooks_notifications_support.sql`. Endpoint reference:
+`docs/api/phase6-endpoints.md`. Requirement → test map (grep-verified names): `docs/CHECKLIST.md`
+"Phase 6" section (10/10). All services run on `backend/`.
+
+| Unit | Scope | Status |
+|------|-------|--------|
+| P6-1 | API standards (§71): `middleware/request-id.ts` (`332d6c8`), tiered `middleware/rate-limit.ts` (`c781a83`), cursor pagination for reserves / funding alerts / members (`79d0690`) | **COMPLETE** — `request-id.test.ts` (6), `rate-limit.test.ts` (8), `pagination-http.test.ts` (3) |
+| P6-2 | Standard error format (§72): `request_id` in every envelope, no stack / SQLite text | **COMPLETE** — `332d6c8`; pinned by `request-id.test.ts`, `secret-exposure.test.ts`, `phase6-security.test.ts` |
+| P6-3 | API keys (§76/§77/§116): `modules/api-keys/*` repository `bf6b10e`, service `0ecd286`, routes `c935015`, bearer auth + `requireScope` `75ccd34` | **COMPLETE** — `api-keys-http.test.ts` (11, `7a45038`), `api-key-auth-http.test.ts` (14, `75ccd34`) |
+| P6-4 | Webhooks (§73–§75/§80): repository `cc946a0`, transport port `4ec2060`, service `3b4a98d`, routes + wiring `f6ecb80`, receiver tolerance + replay guard `643debb`, close-out `a35ed0b` | **COMPLETE** — `webhooks-http.test.ts` (14, `ad754a8`) |
+| P6-5 | Integration adapters (§78/§367): Payment + Payout ports `83f2057`, Notification / Tracking / CRM / Fraud ports + barrel `2ba1cb7`, `CreateAppOptions` wiring `ab071e7` | **COMPLETE** — `integrations/adapters.test.ts` (21, `8a0d877`), `wiring.test.ts` (3) |
+| P6-6 | Notifications (§79/§80): `modules/notifications/*`, IN_APP / EMAIL / WEBHOOK, 7 events, preferences with locked security-critical IN_APP | **COMPLETE** — `2730672`; `notifications-http.test.ts` (13) |
+| P6-7 | Support / disputes / appeals (§81–§83): repository `e1717ab` + `0258d0d`, access `9113b8c`, TicketService `d9862d2`, DisputeService `113e64c`, AppealService `6ea87a4`, routes `ea541a9` + `b6655c8`, mounts `91a1022` | **COMPLETE** — `support-http.test.ts` (9, `6a45185`), `disputes-appeals-http.test.ts` (10, `d9f3b3f` + `f526a60`) |
+| P6-8 | Migration `0012_api_webhooks_notifications_support.sql` + 15 permission keys | **COMPLETE** — `abb646d`; `d1-sqlite.test.ts` "applies 0012: …", `rbac.test.ts` inventory |
+| P6-9 | Security tests (§116): `src/test/phase6-security.test.ts` | **COMPLETE** — `411eb1f` (6 tests) |
+| P6-10 | Docs: `docs/api/phase6-endpoints.md`, CHECKLIST, STATE.md | **COMPLETE** — `46672cd`, `624f6e3`, this commit (Session 73) |
+
+## Phase 6 verification — Session 73 at `46672cd` (2026-10-04)
+
+Fresh sandbox, `npm ci` in `backend/`: typecheck (`tsc` app + test configs) 0 errors; `npx vitest run`
+**693/693 in 76 files**; `HEAD == origin/main`. Final gates (build, secret scan, migrations 0001–0012
+from empty) re-run after the docs commits — results recorded in the Session 73 log entry below.
+
+Definition of Done → test: replayed webhook has effect exactly once →
+`phase6-security.test.ts` "replayed webhook event (same idempotency_key) has effect exactly once: one
+event, one delivery, one transport call after draining twice" and `webhooks-http.test.ts` "DELIVERED →
+409 WEBHOOK_DELIVERY_FINAL (clean envelope); DEAD_LETTER → same row re-queued → DELIVERED exactly once;
+row count stays 1"; invalid API key rejected → `phase6-security.test.ts` "invalid API keys (garbage, wrong
+secret, revoked, expired) → 401 UNAUTHENTICATED; …"; no stack / secret leakage → "secrets never come
+back: …" and "conflict and validation errors keep the envelope and never expose sqlite/trigger/RAISE/
+constraint text". Full map in `docs/CHECKLIST.md`.
+
+## Phase 6 known gaps (carried into Phase 7 / later)
+
+- No real payment / CRM / fraud / tracking vendor — stub / null / memory / log adapters sit behind the six ports.
+- Notification EMAIL (and any SMS) goes through log / stub adapters; no vendor wired.
+- Webhook transport is `fetch` in production and `ScriptedWebhookTransport` in tests; no real receiver exercised.
+- No `scheduled()` wiring: webhook drain (`process-due`), API-key / rotated-key expiry and reconciliation are request-driven or operator-triggered.
+- Tickets, disputes and appeals have no status PATCH route by design (transitions only via `/transition`, `/review`, `/decide`, `/withdraw`).
+- Phase 5 gaps remain: payout policy table, PENDING payout polling, cash settlement, billing profile update / alert acknowledge.
 
 ## Phase 5 — unit status (code `7abbe4a`, 2026-10-02)
 
@@ -309,16 +351,15 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 5 Unit 16 (P5-16) — this commit (Session 58): STATE.md + docs/CHECKLIST.md brought up to the
-Phase 5 code state at `7abbe4a`. Last code unit: P5-15 `7abbe4a` (Session 58): reconciliation ledger
-side tests (`reconciliation/service.test.ts`, 11 tests in file). Verified Session 58 at `7abbe4a`:
-typecheck 0, vitest **574/574** (64 files), `HEAD == origin/main`.
+Phase 6 Unit 10 (P6-10) — this commit (Session 73): STATE.md + docs/CHECKLIST.md (`624f6e3`) brought up
+to the Phase 6 code state at `46672cd`. Last code unit: P6-9 `411eb1f` (phase6-security.test.ts, 6
+tests) + endpoint reference `46672cd`. Verified Session 73 at `46672cd`: typecheck 0, vitest
+**693/693** (76 files), `HEAD == origin/main`.
 
 ## Next Planned Unit
-**None in Phase 5 — Phase 5 is COMPLETE.** Phase 6 (`09-PHASE6-API-WEBHOOKS-INTEGRATIONS-NOTIFICATIONS.md`)
-is NOT STARTED and must not begin without the user's instruction. Phase 5 known gaps (above) are the
-natural Phase 6 inputs: payout provider webhooks / status polling, notifications for funding alerts and
-payout state changes, reconciliation HTTP + scheduling.
+**None in Phase 6 — Phase 6 is COMPLETE.** Phase 7 (`10-PHASE7-DASHBOARDS-FRONTEND.md`) is NOT STARTED
+and must not begin without the user's instruction. Phase 6 known gaps (above) are inputs for Phase 7+
+(vendor adapters, `scheduled()` wiring, dashboards over the Phase 6 surfaces).
 Carry-over items that are NOT blockers: PLATFORM-org bootstrap path (Phase 9), placeholder
 Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval, `EVENTS_QUEUE` enrichment
 consumer (redirect currently records the coarse signals inline; queue binding unused).
@@ -326,7 +367,7 @@ consumer (redirect currently records the coarse signals inline; queue binding un
 ## Open Questions / Blockers
 - Device metadata limited to `ip_address` + `user_agent` (PRD §12 satisfied at that level).
 - Rate limiting / login lockout (PRD §110) deferred to Phase 8; columns exist.
-- Real email provider deferred to Phase 6; `EmailSender` port in place.
+- Real email provider still not wired (Phase 6 added the `NotificationAdapter` port; log/stub only).
 - `docs/PRD.md` ends mid-sentence at line 581 (§134–136 truncated; PRD is not edited).
 - Cloudflare: resource IDs in `backend/wrangler.jsonc` are placeholders; deploy target
   (Genspark-hosted vs own account) undecided; hosted deploy does not support
@@ -397,14 +438,15 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-10-02 — Session 58. Fresh sandbox; resumed from `wip/phase5` `f2458af` (1 ahead of main
-`111adae`). Finished Phase 5 Unit 15 (LEDGER_BEARING fix `4d0f2c8`, Phase 4 tests updated `b0f1edb`,
-ledger-side block `7abbe4a`), ff-merged to main; wrote Unit 16 docs (this commit). Results at
-`7abbe4a`: vitest 574/574 (64 files), typecheck 0. Phase 5: 16/16 units COMPLETE. Phase 6 NOT STARTED.
+2026-10-04 — Session 73. Fresh sandbox at `46672cd` (= origin/main, clean). Step 0: npm ci, typecheck 0,
+vitest 693/693 (76 files). Wrote CHECKLIST Phase 6 10/10 (`624f6e3`), this STATE.md, removed
+`docs/PHASE6-AUDIT.md`. Phase 6: 10/10 units COMPLETE. Phase 7 NOT STARTED.
 
 Session log:
 - Session 25 (2026-09-29): Phase 3 complete at `61fdeaa` (362/362).
 - Sessions 26–37 (2026-09-29 → 2026-09-30): Phase 4 code, P4-1 `a9d4a15` → P4-10c `40e0213` (434/434).
 - Session 38 (2026-09-30): Phase 4 Unit 11 docs.
 - Sessions 39–57 (2026-09-30 → 2026-10-01): Phase 5 code, P5-1 `46cd969` → P5-14 `111adae` (570/570), P5-15 service `f2458af` on `wip/phase5`.
-- Session 58 (2026-10-02): P5-15 finish `4d0f2c8` → `7abbe4a` (574/574), merged to main; P5-16 docs (this commit).
+- Session 58 (2026-10-02): P5-15 finish `4d0f2c8` → `7abbe4a` (574/574), merged to main; P5-16 docs `aac43e6`.
+- Sessions 59–72 (2026-10-02 → 2026-10-04): Phase 6 code — migration 0012 `abb646d`; request-id `332d6c8`, rate limit `c781a83`, pagination `79d0690`; api keys `bf6b10e` → `75ccd34`; webhooks `cc946a0` → `a35ed0b`; adapters `83f2057` → `ab071e7`; notifications `2730672`; support/disputes/appeals `e1717ab` → `f526a60` (687/687); security tests `411eb1f` (693/693); endpoint docs `46672cd`.
+- Session 73 (2026-10-04): P6-10 docs — CHECKLIST `624f6e3`, STATE.md (this commit), PHASE6-AUDIT removed; final gates.
