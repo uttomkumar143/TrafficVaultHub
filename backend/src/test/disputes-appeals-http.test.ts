@@ -206,3 +206,136 @@ describe("disputes — platform face, RBAC and agent grants", () => {
     expect(await count("dispute_decisions", "dispute_id = ?", d.id)).toBe(0);
   });
 });
+
+// ---- appeals (PRD §83) ----------------------------------------------------------------
+
+interface Appeal {
+  id: string;
+  status: string;
+  appeal_type: string;
+  subject_type: string;
+  subject_id: string;
+  created_at: string;
+}
+interface Outcome {
+  outcome: string;
+  reason: string;
+  evidence: string[];
+  actor: string | null;
+  timestamp: string;
+}
+
+const APPEAL_TYPES = ["ACCOUNT_RESTRICTION", "ACCOUNT_SUSPENSION", "CONVERSION_DECISION", "PAYOUT_HOLD", "COMPLIANCE_DECISION"];
+const A = (orgId: string, path = "") => `/organizations/${orgId}/appeals${path}`;
+const PA = (platformOrgId: string, tenantOrgId: string, path = "") => `/organizations/${platformOrgId}/platform/appeals/tenants/${tenantOrgId}${path}`;
+const NEW_APPEAL = { appeal_type: "PAYOUT_HOLD", subject_type: "payout", subject_id: "pay-1", grounds: "The hold references a conversion that was already approved." };
+
+async function submitAppeal(token: string, orgId: string, extra: Record<string, unknown> = {}): Promise<Appeal> {
+  const res = await h.as(token, "POST", A(orgId), { ...NEW_APPEAL, ...extra });
+  expect(res.status).toBe(201);
+  return json<Appeal>(res);
+}
+
+describe("appeals — tenant face", () => {
+  it("submit accepts all 5 subjects (unknown → 400 VALIDATION_ERROR); list/get read back; audit row written", async () => {
+    const a = await advertiser("owner@acme.example", "Acme");
+    const ids: string[] = [];
+    for (const appeal_type of APPEAL_TYPES) {
+      const ap = await submitAppeal(a.owner, a.orgId, { appeal_type, subject_id: `s-${appeal_type}` });
+      expect([ap.status, ap.appeal_type]).toEqual(["SUBMITTED", appeal_type]);
+      ids.push(ap.id);
+    }
+    const bad = await h.as(a.owner, "POST", A(a.orgId), { ...NEW_APPEAL, appeal_type: "REFUND" });
+    expect(bad.status).toBe(400);
+    expect(await h.errorCode(bad)).toBe("VALIDATION_ERROR");
+    const list = await json<Page<Appeal>>(await h.as(a.owner, "GET", A(a.orgId, "?limit=20")));
+    expect(new Set(list.items.map((x) => x.id))).toEqual(new Set(ids));
+    const got = await json<{ appeal: Appeal; outcome: Outcome | null }>(await h.as(a.owner, "GET", A(a.orgId, `/${ids[0]}`)));
+    expect(got.appeal.appeal_type).toBe("ACCOUNT_RESTRICTION");
+    expect(got.outcome).toBeNull();
+    expect((await h.auditRows("appeal.submitted")).map((r) => r.organization_id)).toEqual(Array(5).fill(a.orgId));
+  });
+
+  it("one-open rule: second appeal on the same subject → 409 APPEAL_ALREADY_OPEN; withdraw frees the subject; withdrawn appeal is final (409 APPEAL_FINAL)", async () => {
+    const a = await advertiser("owner@acme.example", "Acme");
+    const ap = await submitAppeal(a.owner, a.orgId);
+    const dup = await h.as(a.owner, "POST", A(a.orgId), NEW_APPEAL);
+    expect(dup.status).toBe(409);
+    expect(await h.errorCode(dup)).toBe("APPEAL_ALREADY_OPEN");
+    const w = await h.as(a.owner, "POST", A(a.orgId, `/${ap.id}/withdraw`));
+    expect(w.status).toBe(200);
+    expect((await json<Appeal>(w)).status).toBe("WITHDRAWN");
+    expect((await h.auditRows("appeal.withdrawn")).map((r) => r.target_id)).toEqual([ap.id]);
+    const again = await h.as(a.owner, "POST", A(a.orgId, `/${ap.id}/withdraw`));
+    expect(again.status).toBe(409);
+    const text = await again.clone().text();
+    expect(await h.errorCode(again)).toBe("APPEAL_FINAL");
+    expect(text).not.toMatch(LEAK);
+    expect((await submitAppeal(a.owner, a.orgId)).status).toBe("SUBMITTED");
+    for (const m of ["PATCH", "PUT"]) expect((await h.as(a.owner, m, A(a.orgId, `/${ap.id}`), { status: "DECIDED" })).status).toBe(404);
+    expect((await h.as(a.owner, "POST", A(a.orgId), { ...NEW_APPEAL, status: "DECIDED" })).status).toBe(400);
+  });
+});
+
+describe("appeals — platform face, RBAC and agent grants", () => {
+  it("review → decide records audited {outcome, reason, evidence, actor, timestamp}; decide before review and after DECIDED → 409 with stable codes", async () => {
+    const a = await advertiser("owner@acme.example", "Acme");
+    const { admin, platformOrgId } = await platform();
+    const ap = await submitAppeal(a.owner, a.orgId);
+    const premature = await h.as(admin, "POST", PA(platformOrgId, a.orgId, `/${ap.id}/decide`), { outcome: "ACCEPTED", reason: "r" });
+    expect(premature.status).toBe(409);
+    expect(await h.errorCode(premature)).toBe("APPEAL_ILLEGAL_TRANSITION");
+    const r = await h.as(admin, "POST", PA(platformOrgId, a.orgId, `/${ap.id}/review`));
+    expect(r.status).toBe(200);
+    expect((await json<Appeal>(r)).status).toBe("UNDER_REVIEW");
+    const body = { outcome: "PARTIALLY_ACCEPTED", reason: "Hold lifted for the approved conversion only.", evidence: ["conversion:conv-9"] };
+    const dec = await h.as(admin, "POST", PA(platformOrgId, a.orgId, `/${ap.id}/decide`), body);
+    expect(dec.status).toBe(200);
+    const out = await json<{ appeal: Appeal; outcome: Outcome }>(dec);
+    expect(out.appeal.status).toBe("DECIDED");
+    expect(out.outcome).toMatchObject({ outcome: "PARTIALLY_ACCEPTED", reason: body.reason, evidence: body.evidence, actor: await userId("admin@network.example") });
+    expect(out.outcome.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const got = await json<{ outcome: Outcome | null }>(await h.as(a.owner, "GET", A(a.orgId, `/${ap.id}`)));
+    expect(got.outcome?.outcome).toBe("PARTIALLY_ACCEPTED");
+    const audit = await h.auditRows("appeal.decided");
+    expect(audit.map((x) => x.target_id)).toEqual([ap.id]);
+    expect(audit[0]?.metadata ?? "").toContain("PARTIALLY_ACCEPTED");
+    expect(await count("appeal_decisions", "appeal_id = ?", ap.id)).toBe(1);
+    for (const [who, path] of [[admin, PA(platformOrgId, a.orgId, `/${ap.id}/decide`)], [a.owner, A(a.orgId, `/${ap.id}/withdraw`)]] as const) {
+      const res = await h.as(who, "POST", path, { outcome: "REJECTED", reason: "again" });
+      expect(res.status).toBe(409);
+      const text = await res.clone().text();
+      expect(await h.errorCode(res)).toBe("APPEAL_FINAL");
+      expect(text).not.toMatch(LEAK);
+    }
+    expect((await h.as(admin, "POST", PA(platformOrgId, a.orgId, `/${ap.id}/decide`), { outcome: "MAYBE", reason: "x" })).status).toBe(400);
+    expect((await submitAppeal(a.owner, a.orgId)).status).toBe("SUBMITTED");
+  });
+
+  it("RBAC: VIEWER cannot submit (403); tenant cannot use platform face; agent needs a grant (404 → 200) and never decides (403); isolation/malformed → 404; unauth → 401", async () => {
+    const a = await advertiser("owner@acme.example", "Acme");
+    const b = await advertiser("owner@beta.example", "Beta");
+    const viewer = await member(a.owner, a.orgId, "viewer@acme.example", "VIEWER");
+    const { admin, agent, platformOrgId, agentUserId } = await platform();
+    const ap = await submitAppeal(a.owner, a.orgId);
+    const v = await h.as(viewer, "POST", A(a.orgId), NEW_APPEAL);
+    expect(v.status).toBe(403);
+    expect(await h.errorCode(v)).toBe("FORBIDDEN");
+    expect((await h.as(viewer, "GET", A(a.orgId, `/${ap.id}`))).status).toBe(200);
+    expect((await h.api("GET", A(a.orgId))).status).toBe(401);
+    expect((await h.as(a.owner, "GET", A(a.orgId, "/not-a-uuid"))).status).toBe(404);
+    expect((await h.as(b.owner, "GET", A(a.orgId, `/${ap.id}`))).status).toBe(404);
+    expect((await h.as(b.owner, "POST", A(b.orgId, `/${ap.id}/withdraw`))).status).toBe(404);
+    expect((await h.as(a.owner, "GET", PA(a.orgId, a.orgId, `/${ap.id}`))).status).toBe(403);
+    expect((await h.as(a.owner, "POST", PA(platformOrgId, a.orgId, `/${ap.id}/review`))).status).toBe(404);
+    expect((await h.as(agent, "GET", PA(platformOrgId, a.orgId, `/${ap.id}`))).status).toBe(404);
+    expect((await h.as(admin, "POST", PS(platformOrgId, a.orgId, "/agents"), { user_id: agentUserId })).status).toBe(201);
+    expect((await h.as(agent, "GET", PA(platformOrgId, a.orgId, `/${ap.id}`))).status).toBe(200);
+    expect((await h.as(agent, "GET", PA(platformOrgId, a.orgId, "/"))).status).toBe(200);
+    expect((await h.as(agent, "GET", PA(platformOrgId, b.orgId, "/"))).status).toBe(404);
+    expect((await h.as(agent, "POST", PA(platformOrgId, a.orgId, `/${ap.id}/review`))).status).toBe(403);
+    expect((await h.as(agent, "POST", PA(platformOrgId, a.orgId, `/${ap.id}/decide`), { outcome: "ACCEPTED", reason: "r" })).status).toBe(403);
+    expect((await h.as(admin, "GET", PA(platformOrgId, a.orgId, `/${RANDOM_ID}`))).status).toBe(404);
+    expect(await count("appeal_decisions", "appeal_id = ?", ap.id)).toBe(0);
+  });
+});
