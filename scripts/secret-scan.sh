@@ -2,6 +2,11 @@
 # Lightweight secret scan for the TrafficVaultHub repository.
 # Scans tracked + untracked (non-ignored) files for common credential patterns.
 # Exit code 0 = clean, 1 = potential secret found (review output).
+#
+# Allowlist convention: a line that is a KNOWN false positive (e.g. a test
+# fixture such as a deliberately wrong login password) may carry the literal
+# marker `secret-scan:allow` in a trailing comment. Only lines with that exact
+# marker are skipped; every skipped line is printed so suppressions stay visible.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -21,13 +26,26 @@ PATTERNS=(
 
 FILES=$(git ls-files --cached --others --exclude-standard | grep -v -E '(^|/)(package-lock\.json|\.gitkeep)$' || true)
 
+ALLOW_MARKER='secret-scan:allow'
 FOUND=0
+ALLOWED=""
 for p in "${PATTERNS[@]}"; do
   # shellcheck disable=SC2086
-  if echo "$FILES" | xargs -r grep -nIE -- "$p" 2>/dev/null; then
+  matches=$(echo "$FILES" | xargs -r grep -nIE -- "$p" 2>/dev/null || true)
+  [ -z "$matches" ] && continue
+  allowed=$(printf '%s\n' "$matches" | grep -F -- "$ALLOW_MARKER" || true)
+  real=$(printf '%s\n' "$matches" | grep -vF -- "$ALLOW_MARKER" || true)
+  [ -n "$allowed" ] && ALLOWED="${ALLOWED}${allowed}"$'\n'
+  if [ -n "$real" ]; then
+    printf '%s\n' "$real"
     FOUND=1
   fi
 done
+
+if [ -n "$ALLOWED" ]; then
+  echo "SECRET SCAN: allowlisted lines (marker '$ALLOW_MARKER', review periodically):"
+  printf '%s' "$ALLOWED" | sed 's/^/  /'
+fi
 
 # Tracked filenames that must never be committed
 if git ls-files | grep -E '(^|/)(\.env|\.env\.[^e].*|\.dev\.vars)$' ; then

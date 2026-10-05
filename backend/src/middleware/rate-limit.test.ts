@@ -117,7 +117,7 @@ describe("rate limiting through createApp (HTTP)", () => {
     });
     const ip = { "cf-connecting-ip": "9.9.9.9", "content-type": "application/json" };
     const login = () =>
-      app.request("/api/v1/auth/login", { method: "POST", headers: ip, body: JSON.stringify({ email: "nobody@example.com", password: "wrong-password-value-1" }) }, env);
+      app.request("/api/v1/auth/login", { method: "POST", headers: ip, body: JSON.stringify({ email: "nobody@example.com", password: "wrong-password-value-1" }) }, env); // secret-scan:allow — deliberately wrong fixture password for a non-existent user
     // Unknown user → 401 (or 400 if validation differs); either way NOT 429 yet.
     expect((await login()).status).not.toBe(429);
     expect((await login()).status).not.toBe(429);
