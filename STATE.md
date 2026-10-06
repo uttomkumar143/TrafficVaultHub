@@ -3,11 +3,22 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
-**Phase 6 — API, Webhooks, Integrations & Notifications** (`09-PHASE6-API-WEBHOOKS-INTEGRATIONS-NOTIFICATIONS.md`)
-is **COMPLETE, all 10 units, code at `46672cd` + docs commits `624f6e3` (CHECKLIST) and this one
-(2026-10-04, Session 73)**; see "Phase 6 — unit status", "Phase 6 verification" and "Phase 6 known gaps"
-below. Do not redo it. **Phase 7 (`10-PHASE7-DASHBOARDS-FRONTEND.md`) is NOT STARTED** — wait for the
-user's instruction.
+**Phase 7 — Dashboards & Frontend** (`10-PHASE7-DASHBOARDS-FRONTEND.md`) — **IN PROGRESS** (Session 76,
+2026-10-06). Unit P7-1 **Affiliate dashboard BACKEND** is COMPLETE on `wip/phase7` → merged to main:
+- `650dd88` `backend/src/modules/affiliate-dashboard/repository.ts` — read-only, scoped by the affiliate's
+  own org id as FIRST bind (`scopedQuery` for `organization_id`, `affiliateScoped` for
+  `affiliate_organization_id`); COUNT/SUM in SQL over a bounded range; money grouped per currency.
+- `d70ba82` `service.ts` — sync `hasPermission` 403 → org type AFFILIATE else 404 → async; allow-list
+  projections; `epc` / `conversion_rate` returned as `{available:false}`.
+- `bc67592` `backend/src/routes/affiliate-dashboard.ts` + wiring (`app.ts`, `lib/bindings.ts`), mounted at
+  `/:orgId/affiliate/dashboard` BEFORE `/:orgId/affiliate` in `routes/organizations.ts`.
+  Endpoints: `GET /overview?from&to`, `GET /offers?limit&cursor`, `GET /links?limit&cursor`.
+- `b836729` `backend/src/test/affiliate-dashboard-http.test.ts` — 7 tests (isolation, 403, 404 non-affiliate,
+  cursor pagination, LEAK TEST, date-range bound, per-currency money).
+Frontend for Phase 7: **NOT STARTED**. Session 75 produced nothing (uncommitted, lost).
+
+Phase 6 — API, Webhooks, Integrations & Notifications is COMPLETE at `46672cd` (+ docs `624f6e3`,
+Session 73); see "Phase 6 — unit status", "Phase 6 verification" and "Phase 6 known gaps" below. Do not redo it.
 
 Phase 5 — Finance, Ledger & Payouts is COMPLETE at `7abbe4a` (Session 58); Phase 4 at `40e0213`
 (Session 38). Their sections below are kept for reference. Do not redo them.
@@ -351,14 +362,14 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 6 Unit 10 (P6-10) — this commit (Session 73): STATE.md + docs/CHECKLIST.md (`624f6e3`) brought up
-to the Phase 6 code state at `46672cd`. Last code unit: P6-9 `411eb1f` (phase6-security.test.ts, 6
-tests) + endpoint reference `46672cd`. Verified Session 73 at `46672cd`: typecheck 0, vitest
-**693/693** (76 files), `HEAD == origin/main`.
+Phase 7 Unit 1 (P7-1) — Affiliate dashboard BACKEND (Session 76): commits `650dd88` (repository),
+`d70ba82` (service), `bc67592` (routes + mount), `b836729` (tests). Verified Session 76: typecheck 0,
+vitest **700/700** (77 files; 693 + 7 new). Merged `wip/phase7` → `main` ff-only.
 
 ## Next Planned Unit
-**None in Phase 6 — Phase 6 is COMPLETE.** Phase 7 (`10-PHASE7-DASHBOARDS-FRONTEND.md`) is NOT STARTED
-and must not begin without the user's instruction. Phase 6 known gaps (above) are inputs for Phase 7+
+**P7-2 — Affiliate dashboard FRONTEND** (consume `GET /organizations/:orgId/affiliate/dashboard/{overview,
+offers,links}`), then advertiser / platform dashboards per `10-PHASE7-DASHBOARDS-FRONTEND.md`. Only on the
+user's instruction. Phase 6 known gaps (above) are inputs for Phase 7+
 (vendor adapters, `scheduled()` wiring, dashboards over the Phase 6 surfaces).
 Carry-over items that are NOT blockers: PLATFORM-org bootstrap path (Phase 9), placeholder
 Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval, `EVENTS_QUEUE` enrichment
@@ -438,7 +449,10 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-10-04 — Session 73. Fresh sandbox at `46672cd` (= origin/main, clean). Step 0: npm ci, typecheck 0,
+2026-10-06 — Session 76. Phase 7 P7-1 affiliate dashboard backend (4 commits on `wip/phase7`, merged to
+main). typecheck 0, vitest 700/700 (77 files). Frontend NOT STARTED.
+
+Previous: 2026-10-04 — Session 73. Fresh sandbox at `46672cd` (= origin/main, clean). Step 0: npm ci, typecheck 0,
 vitest 693/693 (76 files). Wrote CHECKLIST Phase 6 10/10 (`624f6e3`), this STATE.md, removed
 `docs/PHASE6-AUDIT.md`. Phase 6: 10/10 units COMPLETE. Phase 7 NOT STARTED.
 
