@@ -29,6 +29,8 @@ import { OrganizationService } from "./modules/organizations/service";
 import type { PaymentProvider } from "./modules/payouts/provider";
 import { StubPaymentAdapter } from "./modules/payouts/stub-adapter";
 import { EligibilityCache } from "./modules/tracking/eligibility-cache";
+import { AffiliateDashboardRepository } from "./modules/affiliate-dashboard/repository";
+import { AffiliateDashboardService } from "./modules/affiliate-dashboard/service";
 import { TrackingRepository } from "./modules/tracking/repository";
 import { TrackingService } from "./modules/tracking/service";
 import { FetchWebhookTransport, type WebhookTransport } from "./modules/webhooks/transport";
@@ -162,6 +164,7 @@ export function createApp(options: CreateAppOptions = {}) {
       "trackingService",
       new TrackingService(new TrackingRepository(c.env.DB), new AffiliateRepository(c.env.DB), new OfferRepository(c.env.DB), c.env.DB),
     );
+    c.set("affiliateDashboardService", new AffiliateDashboardService(new AffiliateDashboardRepository(c.env.DB)));
     await next();
   };
   app.use("/api/v1/auth/*", wireServices);

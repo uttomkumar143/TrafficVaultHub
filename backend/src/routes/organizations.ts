@@ -61,6 +61,7 @@ import { SELF_SERVICE_ORG_TYPES } from "../modules/organizations/service";
 import { advertiserReviewRoutes, advertiserRoutes } from "./advertisers";
 import { apiKeyRoutes } from "./api-keys";
 import { affiliateReviewRoutes, affiliateRoutes } from "./affiliates";
+import { affiliateDashboardRoutes } from "./affiliate-dashboard";
 import { billingRoutes, platformBillingRoutes } from "./billing";
 import { marketplaceRoutes, offerReviewRoutes, offerRoutes } from "./offers";
 import { attributionPolicyRoutes, attributionRoutes, conversionRoutes, postbackSecretRoutes } from "./attribution";
@@ -140,6 +141,9 @@ organizationRoutes.route("/:orgId/platform", platformDisputeAppealRoutes);
 // Phase 2 sub-modules (each route adds its own requirePermission).
 organizationRoutes.route("/:orgId/advertiser", advertiserRoutes);
 organizationRoutes.route("/:orgId/platform/advertisers", advertiserReviewRoutes);
+// Phase 7 Unit 3 — affiliate dashboard (read-only). Mounted BEFORE the broader
+// `/:orgId/affiliate` group so `/affiliate/dashboard/*` is matched here first.
+organizationRoutes.route("/:orgId/affiliate/dashboard", affiliateDashboardRoutes);
 organizationRoutes.route("/:orgId/affiliate", affiliateRoutes);
 organizationRoutes.route("/:orgId/platform/affiliates", affiliateReviewRoutes);
 organizationRoutes.route("/:orgId/offers", offerRoutes);

@@ -11,6 +11,7 @@ import type { OfferService } from "../modules/offers/service";
 import type { OrganizationService } from "../modules/organizations/service";
 import type { PaymentProvider } from "../modules/payouts/provider";
 import type { TrackingService } from "../modules/tracking/service";
+import type { AffiliateDashboardService } from "../modules/affiliate-dashboard/service";
 import type { WebhookTransport } from "../modules/webhooks/transport";
 
 export interface Bindings {
@@ -62,6 +63,8 @@ export interface Variables {
   offerService: OfferService;
   /** Phase 3 Unit 1 — tracking links + click reads. */
   trackingService: TrackingService;
+  /** Phase 7 Unit 3 — affiliate dashboard read model. */
+  affiliateDashboardService: AffiliateDashboardService;
   /**
    * Phase 5 — payment provider for the PLATFORM payout `process` step.
    * Set by `createApp` (default StubPaymentAdapter; no real provider yet).
