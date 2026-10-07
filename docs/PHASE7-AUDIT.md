@@ -1,4 +1,4 @@
-# Phase 7 audit — `10-PHASE7-DASHBOARDS-FRONTEND.md` (Session 78, at `2300369`)
+# Phase 7 audit — `10-PHASE7-DASHBOARDS-FRONTEND.md` (Session 78 at `2300369`; patched Session 80 at `435c2b6`)
 
 Baseline re-verified: backend typecheck 0 / vitest 700 (77 files) / build OK; frontend typecheck 0 /
 vitest 104 (10 files) / build OK. Permission catalogue + table columns extracted from `migrations/`.
@@ -6,7 +6,7 @@ vitest 104 (10 files) / build OK. Permission catalogue + table columns extracted
 | # | Spec requirement | Status | Evidence / plan |
 |---|------------------|--------|-----------------|
 | 1a | Affiliate dashboard — backend read endpoints (overview / offers / links) | DONE | `modules/affiliate-dashboard/{repository,service}.ts`, `routes/affiliate-dashboard.ts`, `test/affiliate-dashboard-http.test.ts` (7) — commits `650dd88` `d70ba82` `bc67592` `b836729` |
-| 1b | Affiliate dashboard — frontend (TanStack Query + Recharts; sections of §1) | MISSING | no `frontend/src/features/affiliate-dashboard/`, no route. Build `features/dashboards/*` shared + `routes/app/affiliate-dashboard-page.tsx` |
+| 1b | Affiliate dashboard — frontend (TanStack Query; sections of §1) | DONE | `frontend/src/features/affiliate-dashboard/{api,hooks}.ts`, `routes/app/affiliate-dashboard-page.tsx` (`/app/:orgId/dashboard`), AFFILIATE-gated nav, `affiliate-dashboard-routes.test.tsx` (10) — commit `b3c2172`. Frontend vitest 114 (11 files) |
 | 2 | Advertiser dashboard — backend + frontend | MISSING | no `modules/advertiser-dashboard/`. Scope: `offers.organization_id`, `clicks.offer_organization_id`, `conversions.organization_id`, `commissions.organization_id` (advertiser economics are the advertiser's OWN here), `fraud_cases`, `advertiser_billing_profiles`, `webhook_deliveries`, `support_tickets` — all `organization_id = ?` |
 | 3 | Admin dashboard — backend + frontend (PLATFORM) | MISSING | no platform dashboard module. Deliberately unscoped reads (same discipline as `PayoutRepository.listPageAll`), PLATFORM org type → else 404, per-section permission gating |
 | 4 | Finance dashboard (PLATFORM) | MISSING | ledger balances via SUM over `ledger_entries` per (account code, currency); payouts, `financial_adjustments`, `reserves`, `reconciliation_runs`. No `invoices`/`payments` tables exist → `{available:false}` |
@@ -21,4 +21,4 @@ Permission keys reused (no new keys): `tracking.read`, `offers.read`, `conversio
 `payouts.read`, `fraud.read`, `compliance.read`, `billing.read`, `webhooks.read`, `support.read`,
 `disputes.read`, `appeals.read`, `audit.read`, `organizations.read`, `affiliates.read`, `advertisers.read`.
 
-Build order: 1b → 2 → 3 → 4 → 5 → 7 → 6 → docs. This file is deleted once folded into `docs/CHECKLIST.md`.
+Build order: ~~1b~~ → 2 → 3 → 4 → 5 → 7 → 6 → docs. This file is deleted once folded into `docs/CHECKLIST.md`.
