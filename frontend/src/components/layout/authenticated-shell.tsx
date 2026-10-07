@@ -50,6 +50,10 @@ export function AuthenticatedShell() {
         sections.push({ to: `/app/${orgId}/marketplace`, label: "Marketplace", end: false });
       }
     }
+    // Phase 7 — affiliate dashboard (AFFILIATE org type only; server 404s otherwise).
+    if (orgType === "AFFILIATE" && (tenant.can("tracking.read") || tenant.can("offers.read"))) {
+      sections.push({ to: `/app/${orgId}/dashboard`, label: "Dashboard", end: false });
+    }
   }
 
   return (

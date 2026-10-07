@@ -18,6 +18,7 @@ import { CreateOfferPage } from "@/routes/app/create-offer-page";
 import { OfferDetailPage } from "@/routes/app/offer-detail-page";
 import { MarketplacePage } from "@/routes/app/marketplace-page";
 import { MarketplaceOfferPage } from "@/routes/app/marketplace-offer-page";
+import { AffiliateDashboardPage } from "@/routes/app/affiliate-dashboard-page";
 
 /** Route table. Additional feature routes are registered here in later phases. */
 export const routes: RouteObject[] = [
@@ -57,6 +58,8 @@ export const routes: RouteObject[] = [
       // Phase 2 — affiliate/partner marketplace (offers.read; confidential-safe projection)
       { path: ":orgId/marketplace", element: <MarketplacePage /> },
       { path: ":orgId/marketplace/:offerId", element: <MarketplaceOfferPage /> },
+      // Phase 7 — affiliate dashboard (tracking.read / offers.read; AFFILIATE org type only)
+      { path: ":orgId/dashboard", element: <AffiliateDashboardPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },
