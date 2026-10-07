@@ -362,14 +362,20 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 7 Unit 1 (P7-1) — Affiliate dashboard BACKEND (Session 76): commits `650dd88` (repository),
-`d70ba82` (service), `bc67592` (routes + mount), `b836729` (tests). Verified Session 76: typecheck 0,
-vitest **700/700** (77 files; 693 + 7 new). Merged `wip/phase7` → `main` ff-only.
+Phase 7 Unit 1b (P7-1b) — Affiliate dashboard FRONTEND (Session 79): commit `b3c2172` —
+`frontend/src/features/affiliate-dashboard/{api,hooks}.ts`, `routes/app/affiliate-dashboard-page.tsx`
+(`/app/:orgId/dashboard`; overview / offers / links; loading / empty / 403 / 404 states; `{available:false}`
+→ "Not available"; money via `lib/money.ts` only), AFFILIATE-gated "Dashboard" nav entry, route wiring,
+`affiliate-dashboard-routes.test.tsx` (10). Verified Session 79: frontend typecheck 0, vitest **114/114**
+(11 files; 104 + 10 new), build OK. Backend unchanged (700/700, 77 files, Session 76 baseline).
+Earlier: P7-1 backend `650dd88` `d70ba82` `bc67592` `b836729`.
 
 ## Next Planned Unit
-**P7-2 — Affiliate dashboard FRONTEND** (consume `GET /organizations/:orgId/affiliate/dashboard/{overview,
-offers,links}`), then advertiser / platform dashboards per `10-PHASE7-DASHBOARDS-FRONTEND.md`. Only on the
-user's instruction. Phase 6 known gaps (above) are inputs for Phase 7+
+**P7-2 — Advertiser dashboard** (backend `modules/advertiser-dashboard/` + `routes/advertiser-dashboard.ts`
+scoped by `organization_id = ?` over offers / clicks (`offer_organization_id`) / conversions / commissions /
+fraud_cases / billing / webhook_deliveries / support_tickets, THEN frontend mirroring Unit 1b), then
+P7-3 admin, P7-4 finance, P7-5 compliance, P7-7 system health, P7-6 global search, docs — build order per
+`docs/PHASE7-AUDIT.md`. Only on the user's instruction. Phase 6 known gaps (above) are inputs for Phase 7+
 (vendor adapters, `scheduled()` wiring, dashboards over the Phase 6 surfaces).
 Carry-over items that are NOT blockers: PLATFORM-org bootstrap path (Phase 9), placeholder
 Cloudflare IDs (Phase 9), platform-reviewer UI for offer approval, `EVENTS_QUEUE` enrichment
