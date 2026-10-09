@@ -1,0 +1,6 @@
+{
+  "name": "TrafficVaultHub",
+  "description": "Performance marketing and CPA affiliate network platform with offer marketplace, tracking, attribution, and partner management.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

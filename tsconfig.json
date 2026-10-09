@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./frontend/src/*"]
+    },
+    "types": ["node"],
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": [
+    "server.ts",
+    "vite.config.ts",
+    "types/**/*.d.ts",
+    "frontend/src/**/*.ts",
+    "frontend/src/**/*.tsx",
+    "backend/src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "backend/src/index.ts",
+    "backend/src/workers/**",
+    "backend/src/**/*.test.ts",
+    "backend/src/test/**",
+    "frontend/src/**/*.test.ts",
+    "frontend/src/**/*.test.tsx",
+    "frontend/src/test/**"
+  ]
+}
