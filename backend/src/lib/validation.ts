@@ -8,7 +8,7 @@ import { AppError } from "./errors";
  * become a 400 VALIDATION_ERROR in the uniform envelope; field-level details
  * are summarised in the message without echoing submitted values.
  */
-export async function parseJsonBody<T>(c: Context, schema: ZodType<T, any, any>): Promise<T> {
+export async function parseJsonBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
   let raw: unknown;
   try {
     raw = await c.req.json();
