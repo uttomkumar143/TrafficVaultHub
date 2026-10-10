@@ -3,8 +3,22 @@
 <!-- Contains ONLY verified information from repository inspection. -->
 
 ## Current Phase
-**Phase 7 — Dashboards & Frontend** (`10-PHASE7-DASHBOARDS-FRONTEND.md`) — **IN PROGRESS** (Session 76,
-2026-10-06). Unit P7-1 **Affiliate dashboard BACKEND** is COMPLETE on `wip/phase7` → merged to main:
+**Phase 7 — Dashboards & Frontend** (`10-PHASE7-DASHBOARDS-FRONTEND.md`) — **IN PROGRESS** (Session 81,
+2026-10-10). **Unit P7-1 Affiliate dashboard: IN PROGRESS** — sections Overview / Offers / My Links shipped
+(backend `650dd88`..`b836729`, frontend `b3c2172`); remaining sections (in order) SmartLinks, Clicks,
+Conversions, Earnings, Payouts, Creatives, Traffic Sources, Reports, Notifications, Support, API, Settings.
+Unit P7-2 (Advertiser) **NOT STARTED**.
+
+Session 81 baseline repair (`40017ee`): user commits `4cc0fc4` (removed both lockfiles, stripped exec bit on
+`scripts/secret-scan.sh`) and `1fcab2d` (root `package.json`/`server.ts`/`tsconfig.json`/`vite.config.ts`/
+`types/cloudflare.d.ts`, and `validation.ts` `ZodType<T, any, any>`) left CI red: `npm ci` exit 1 (no lockfile)
+and backend typecheck 89 errors (zod 4 lost `T` inference → every `parseJsonBody` result `unknown`; the
+webhooks.ts 164/188/227 errors were symptoms). Fix: one-line revert to `ZodType<T>`, lockfiles restored
+from `4cc0fc4^` (in sync with manifests), `100755` restored. Root-level `npx tsc --noEmit` (user's new root
+`tsconfig.json`, not in CI) OOMs in the sandbox — not fixed, not a CI gate; root `package-lock.json` left
+untracked (user's local artifact, not committed).
+
+P7-1 **backend** (Overview / Offers / Links) on `wip/phase7` → merged to main:
 - `650dd88` `backend/src/modules/affiliate-dashboard/repository.ts` — read-only, scoped by the affiliate's
   own org id as FIRST bind (`scopedQuery` for `organization_id`, `affiliateScoped` for
   `affiliate_organization_id`); COUNT/SUM in SQL over a bounded range; money grouped per currency.
@@ -362,7 +376,11 @@ faithfully via `node --test` + a vitest-compatible shim (`outputs/harness/`):
   `[A-Za-z0-9/+_=-]` (secret-scan flags them).
 
 ## Last Completed Unit
-Phase 7 Unit 1b (P7-1b) — Affiliate dashboard FRONTEND (Session 79): commit `b3c2172` —
+Session 81 baseline repair `40017ee` (see Current Phase). Verified at `40017ee`: backend `npm ci` 0, typecheck 0,
+vitest **700/700** (77 files), build 0; frontend `npm ci` 0, typecheck 0, vitest **114/114** (11 files),
+build 0; secret scan CLEAN (329 files); migrations 0001–0012 apply from empty local D1.
+
+Previous: Phase 7 Unit 1b (P7-1b) — Affiliate dashboard FRONTEND (Session 79): commit `b3c2172` —
 `frontend/src/features/affiliate-dashboard/{api,hooks}.ts`, `routes/app/affiliate-dashboard-page.tsx`
 (`/app/:orgId/dashboard`; overview / offers / links; loading / empty / 403 / 404 states; `{available:false}`
 → "Not available"; money via `lib/money.ts` only), AFFILIATE-gated "Dashboard" nav entry, route wiring,
@@ -371,7 +389,13 @@ Phase 7 Unit 1b (P7-1b) — Affiliate dashboard FRONTEND (Session 79): commit `b
 Earlier: P7-1 backend `650dd88` `d70ba82` `bc67592` `b836729`.
 
 ## Next Planned Unit
-**P7-2 — Advertiser dashboard** (backend `modules/advertiser-dashboard/` + `routes/advertiser-dashboard.ts`
+**P7-1 (continued) — Affiliate dashboard remaining sections**, one section per commit, in this order:
+SmartLinks → Clicks → Conversions → Earnings → Payouts → Creatives → Traffic Sources → Reports →
+Notifications → Support → API → Settings. Per section: backend read endpoint (scoped, cursor-paginated,
+read-only) + HTTP tests → frontend view (TanStack Query; loading/empty/error/"Not yet available") + route
+tests → STATE.md → commit → push. Capabilities with no backend table/route → `{available:false}` and documented.
+
+After P7-1: **P7-2 — Advertiser dashboard** (backend `modules/advertiser-dashboard/` + `routes/advertiser-dashboard.ts`
 scoped by `organization_id = ?` over offers / clicks (`offer_organization_id`) / conversions / commissions /
 fraud_cases / billing / webhook_deliveries / support_tickets, THEN frontend mirroring Unit 1b), then
 P7-3 admin, P7-4 finance, P7-5 compliance, P7-7 system health, P7-6 global search, docs — build order per
@@ -455,7 +479,11 @@ NEXT EXACT ACTION: WAIT for the next phase instruction. Do NOT start
 ```
 
 ## Last Updated
-2026-10-06 — Session 76. Phase 7 P7-1 affiliate dashboard backend (4 commits on `wip/phase7`, merged to
+2026-10-10 — Session 81. HEAD at start `1fcab2d` (= origin/main). Baseline repair `40017ee`. Gates at
+`40017ee`: backend 700/700 (77 files), frontend 114/114 (11 files), typecheck 0/0, builds 0/0, scan CLEAN,
+migrations OK. Then P7-1 remaining sections (see Next Planned Unit).
+
+Previous: 2026-10-06 — Session 76. Phase 7 P7-1 affiliate dashboard backend (4 commits on `wip/phase7`, merged to
 main). typecheck 0, vitest 700/700 (77 files). Frontend NOT STARTED.
 
 Previous: 2026-10-04 — Session 73. Fresh sandbox at `46672cd` (= origin/main, clean). Step 0: npm ci, typecheck 0,
